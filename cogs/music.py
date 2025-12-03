@@ -195,13 +195,22 @@ class Music(commands.Cog):
                 # Shuffle logic remains simple for now
                 pass 
             
-            query, requester = self.queue.popleft()
-            self.current_song = (query, requester)
+            query, requester_id = self.queue.popleft()
+            self.current_song = (query, requester_id)
             
             try:
                 # Ensure we are still connected
                 if not ctx.voice_client:
-                    return
+                    # Try to reconnect to the requester's channel
+                    guild = ctx.guild
+                    requester = guild.get_member(requester_id)
+                    if requester and requester.voice:
+                         await requester.voice.channel.connect(self_deaf=True)
+                    else:
+                         await ctx.send(f"Skipped **{query}**: Bot is not connected to voice and cannot reconnect.")
+                         # Try next song? Or stop? Let's stop to prevent loop spam.
+                         self.queue.clear()
+                         return
 
                 source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
                 
@@ -275,8 +284,14 @@ class Music(commands.Cog):
     @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
         await ctx.defer() # Defer immediately to prevent timeout
+        
+        # Ensure we are connected to voice
         if not await self.ensure_voice(ctx):
             return
+            
+        # Double check voice connection
+        if not ctx.voice_client:
+            return await ctx.send("Error: Failed to verify voice connection.")
 
         if 'spotify.com' in query:
             msg = await ctx.send("Processing Spotify link...")
