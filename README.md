@@ -90,13 +90,24 @@ After starting the bot, run this command in your server to register Slash Comman
 ### 📂 Playlist Commands / 播放列表
 
 *   `/playlist create <name>`: Create a new playlist. <br> 创建一个新歌单。
-*   `/playlist add <name> <song>`: Add current song/url to playlist. <br> 添加当前歌曲/链接到歌单。
+*   `/playlist add <name> <song_query>`: Add single song, YouTube playlist URL, or Spotify URL to playlist. <br> 添加单曲、YouTube 播放列表链接或 Spotify 链接到歌单。
 *   `/playlist show <name>`: Show all songs in a playlist with indices. <br> 显示歌单所有歌曲（带序号）。
 *   `/playlist remove <name> <index>`: Remove a song from a playlist by index. <br> 根据序号从歌单中移除歌曲。
 *   `/playlist load <name>`: Load playlist to queue. <br> 将歌单加载到播放队列。
 *   `/playlist list`: List all playlists. <br> 列出所有歌单。
 *   `/playlist delete <name>`: Delete a playlist. <br> 删除整个歌单。
 
+**💡 提示 / Tips:**
+*   `/playlist` 命令的所有子命令 (`add`, `load`, `delete`, `show`, `remove`) 的**歌单名称 (name)** 参数都支持**自动补全**！
+*   `/playlist remove` 命令的**歌曲序号 (index)** 参数也支持**自动补全**，方便你选择要删除的歌曲。
+
+## ➕ Invite Bot / 邀请机器人
+
+使用此链接邀请机器人到你的 Discord 服务器：
+
+[邀请你的音乐机器人](https://discord.com/api/oauth2/authorize?client_id=1445653328703913984&permissions=8&scope=bot%20applications.commands)
+
+---
 ## ⚠️ Troubleshooting / 故障排除
 
 *   **"PrivilegedIntentsRequired" Error**:
