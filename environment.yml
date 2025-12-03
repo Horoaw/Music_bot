@@ -1,0 +1,15 @@
+name: discord_music_bot
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - ffmpeg
+  - pip
+  - pip:
+    - discord.py[voice]
+    - yt-dlp
+    - python-dotenv
+    - spotipy
+    - requests
+    - beautifulsoup4

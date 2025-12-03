@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.venv
+env/
+venv/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Music downloads (if any persist)
+*.mp3
+*.webm
+downloads/
