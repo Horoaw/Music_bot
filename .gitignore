@@ -33,7 +33,10 @@ runs/
 logs/
 checkpoints/
 data/*.csv
-data/*.json # If data dir is used for large datasets
+data/*.json
 wandb/
 mlruns/
 .ipynb_checkpoints/
+
+# Ignore playlist data to prevent overwriting server data
+data/playlists/*.json
