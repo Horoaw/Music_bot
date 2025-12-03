@@ -350,22 +350,74 @@ class Music(commands.Cog):
             json.dump([], f)
         await ctx.send(f"Playlist **{name}** created.")
 
-    @playlist.command(name='add', description="Adds a song (URL/Query) to a playlist.")
-    @app_commands.describe(name="The name of the playlist.", song="The song URL or search term.")
-    @app_commands.autocomplete(name=playlist_autocomplete, song=play_autocomplete)
-    async def pl_add(self, ctx: commands.Context, name: str, *, song: str):
+    @playlist.command(name='add', description="Adds songs to a playlist. Supports URLs, search terms (comma-separated), or playlists.")
+    @app_commands.describe(name="The name of the playlist.", song_query="URLs/Terms (separate with comma for multiple), or a Playlist URL.")
+    @app_commands.autocomplete(name=playlist_autocomplete)
+    async def pl_add(self, ctx: commands.Context, name: str, *, song_query: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
         
+        # Read existing tracks
         with open(filepath, 'r') as f:
             tracks = json.load(f)
-        
-        tracks.append(song)
-        
+
+        added_count = 0
+        if 'list=' in song_query and ('youtube.com/playlist' in song_query or 'youtube.com/watch' in song_query): # Check for YouTube playlist URL
+            msg = await ctx.send("Processing YouTube playlist...")
+            try:
+                loop = self.bot.loop or asyncio.get_event_loop()
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_query, download=False, process_info=False)) # process_info=False for faster playlist info
+
+                if 'entries' in data:
+                    for entry in data['entries']:
+                        # Re-extract info for each entry to get proper URL if needed
+                        song_info = await loop.run_in_executor(None, lambda: ytdl.extract_info(entry['url'], download=False))
+                        tracks.append(song_info.get('webpage_url', song_info.get('url', song_info.get('title'))))
+                        added_count += 1
+                await msg.edit(content=f"Added {added_count} songs from YouTube playlist to **{name}**.")
+            except Exception as e:
+                await msg.edit(content=f"Error processing YouTube playlist: {e}")
+                print(f"Error processing YouTube playlist: {e}")
+                return
+        elif 'spotify.com' in song_query:
+            msg = await ctx.send("Processing Spotify link...")
+            spotify_tracks = await self.get_spotify_tracks(song_query)
+            if not spotify_tracks:
+                await msg.edit(content="Could not load Spotify tracks.")
+                return
+            for track_title in spotify_tracks:
+                tracks.append(track_title)
+                added_count += 1
+            await msg.edit(content=f"Added {added_count} songs from Spotify link to **{name}**.")
+        else:
+            # Check for multiple songs separated by comma or pipe
+            # Replace pipe with comma, then split by comma
+            songs_to_add = [s.strip() for s in song_query.replace('|', ',').split(',') if s.strip()]
+            
+            for song in songs_to_add:
+                tracks.append(song)
+                added_count += 1
+            
+            if added_count > 1:
+                await ctx.send(f"Added {added_count} songs to playlist **{name}**:\n" + ", ".join(songs_to_add)[:1900])
+            elif added_count == 1:
+                await ctx.send(f"Added **{songs_to_add[0]}** to playlist **{name}**.")
+            else:
+                await ctx.send("No valid songs found to add.")
+
+        # Write updated tracks
         with open(filepath, 'w') as f:
             json.dump(tracks, f)
-        await ctx.send(f"Added **{song}** to playlist **{name}**.")
+
+    async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        # Only provide autocomplete if the input is not a URL
+        if current.startswith(('http://', 'https://')):
+            return []
+        if not current:
+            return []
+        # ... (rest of the play_autocomplete logic)
+
 
     @playlist.command(name='list', description="Lists all saved playlists.")
     async def pl_list(self, ctx: commands.Context):
