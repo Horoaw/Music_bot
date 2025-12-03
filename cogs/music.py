@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+from discord import app_commands
 import yt_dlp
 import asyncio
 import os
@@ -7,6 +8,7 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 from collections import deque
 import random
+import json
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
 yt_dlp.utils.bug_reports_message = lambda: ''
@@ -22,12 +24,12 @@ ytdl_format_options = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0' # Bind to ipv4 since ipv6 addresses cause issues sometimes
+    'source_address': '0.0.0.0' 
 }
 
 ffmpeg_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5' # Reconnect on stream drop
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
@@ -43,25 +45,83 @@ class YTDLSource(discord.PCMVolumeTransformer):
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        # If it's a search query (not a URL), ytdl handles it via default_search
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
 
         if 'entries' in data:
-            # take first item from a playlist/search result
+            # take first item from a playlist
             data = data['entries'][0]
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
         return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
 
+    @classmethod
+    async def search_source(cls, query, *, loop=None, stream=True):
+        """Searches for a query and returns a list of (title, url, id) tuples for selection."""
+        loop = loop or asyncio.get_event_loop()
+        # 'ytsearch5:' gets top 5 results
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
+        
+        if 'entries' not in data:
+            return []
+        
+        results = []
+        for entry in data['entries']:
+            results.append({
+                'title': entry.get('title'),
+                'url': entry.get('webpage_url', entry.get('url')),
+                'id': entry.get('id')
+            })
+        return results
+
+class SearchSelect(discord.ui.Select):
+    def __init__(self, ctx, results, music_cog):
+        self.ctx = ctx
+        self.music_cog = music_cog
+        self.results = results
+        options = []
+        for i, res in enumerate(results):
+            # Limit label size to 100 chars
+            label = f"{i+1}. {res['title']}"[:100]
+            options.append(discord.SelectOption(label=label, value=str(i)))
+
+        super().__init__(placeholder="Select a song to play...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user != self.ctx.author:
+            return await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+        
+        selection_index = int(self.values[0])
+        selected_song = self.results[selection_index]
+        
+        # Add to queue via the music cog
+        await interaction.response.defer() # Acknowledge interaction to prevent timeout
+        
+        # Add to queue logic (reusing play logic somewhat)
+        self.music_cog.queue.append((selected_song['url'], self.ctx.author.id))
+        await interaction.followup.send(f"Selected and queued: **{selected_song['title']}**")
+        
+        if not self.ctx.voice_client.is_playing():
+            self.music_cog.play_next(self.ctx)
+
+class SearchView(discord.ui.View):
+    def __init__(self, ctx, results, music_cog):
+        super().__init__(timeout=60)
+        self.add_item(SearchSelect(ctx, results, music_cog))
+
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.queue = deque() # Stores tuples: (query_or_url, requester_id)
+        self.queue = deque()
         self.current_song = None
         self.is_looping = False
         self.is_shuffling = False
         self.autoplay = False
+        self.playlist_dir = 'data/playlists'
         
+        # Create playlist dir if not exists
+        if not os.path.exists(self.playlist_dir):
+            os.makedirs(self.playlist_dir)
+
         # Spotify Setup
         self.spotify = None
         client_id = os.getenv('SPOTIPY_CLIENT_ID')
@@ -76,10 +136,8 @@ class Music(commands.Cog):
             print("Spotify credentials not found. Spotify support disabled.")
 
     async def get_spotify_tracks(self, url):
-        """Extracts track(s) from a Spotify URL and returns a list of search queries."""
         if not self.spotify:
             return []
-        
         results = []
         try:
             if 'track' in url:
@@ -97,26 +155,22 @@ class Music(commands.Cog):
                     results.append(f"{item['artists'][0]['name']} - {item['name']}")
         except Exception as e:
             print(f"Error fetching Spotify tracks: {e}")
-        
         return results
 
     def play_next(self, ctx):
         if self.is_looping and self.current_song:
-            # If looping, add the current song back to the front (or just replay it)
-            # To keep it simple, we'll re-queue the *query* of the current song
             self.queue.appendleft(self.current_song)
 
         if len(self.queue) > 0:
             if self.is_shuffling:
-                # Randomly pick a song from queue
-                # Note: deque doesn't support random access efficiently, so we convert to list temporarily
-                # A better shuffle implementation would shuffle the deque once on command
-                pass # Basic shuffle implemented in command, here we just take next
+                # Simple shuffle: pick random index
+                # Note: Real shuffle rearranges the queue, here we just PICK randomly for next
+                # But 'shuffle' command physically rearranges queue, so we can just popleft
+                pass 
             
             query, requester = self.queue.popleft()
             self.current_song = (query, requester)
             
-            # Resolve source
             coro = YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
             future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
             
@@ -126,152 +180,175 @@ class Music(commands.Cog):
                 asyncio.run_coroutine_threadsafe(ctx.send(f'Now playing: **{player.title}**'), self.bot.loop)
             except Exception as e:
                 print(f"Error playing {query}: {e}")
-                self.play_next(ctx) # Skip faulty song
+                self.play_next(ctx)
         else:
             self.current_song = None
-            if self.autoplay:
-                # TODO: Implement autoplay logic here (fetch related from last song)
-                pass
-            # Disconnect logic could go here if 24/7 mode is off
+            asyncio.run_coroutine_threadsafe(ctx.send("Queue finished."), self.bot.loop)
 
-    @commands.command(name='play', aliases=['p'])
-    async def play(self, ctx, *, query):
-        """Plays a song from YouTube, Spotify, or URL."""
-        
+    async def ensure_voice(self, ctx):
         if not ctx.voice_client:
             if ctx.author.voice:
                 await ctx.author.voice.channel.connect()
             else:
-                return await ctx.send("You are not connected to a voice channel.")
+                await ctx.send("You are not connected to a voice channel.")
+                return False
+        return True
 
-        # Check for Spotify
+    @commands.command(name='play', aliases=['p'])
+    async def play(self, ctx, *, query):
+        """Plays a song or adds to queue (URL or Search)."""
+        if not await self.ensure_voice(ctx):
+            return
+
         if 'spotify.com' in query:
             msg = await ctx.send("Processing Spotify link...")
             tracks = await self.get_spotify_tracks(query)
             if not tracks:
-                return await msg.edit(content="Could not load Spotify tracks. Check URL or Bot Config.")
-            
+                return await msg.edit(content="Could not load Spotify tracks.")
             for track in tracks:
                 self.queue.append((track, ctx.author.id))
-            
             await msg.edit(content=f"Queued {len(tracks)} tracks from Spotify.")
-            
-            if not ctx.voice_client.is_playing():
-                self.play_next(ctx)
         else:
-            # Regular YouTube/URL
             self.queue.append((query, ctx.author.id))
-            if not ctx.voice_client.is_playing():
-                self.play_next(ctx)
-            else:
-                await ctx.send(f'Added to queue: {query}')
+            await ctx.send(f"Added to queue: {query}")
 
-    @commands.command(name='queue', aliases=['q'])
-    async def queue_info(self, ctx):
-        """Displays the current queue."""
-        if len(self.queue) == 0:
-            return await ctx.send("Queue is empty.")
-        
-        msg = "**Queue:**\n"
-        for i, (query, _) in enumerate(list(self.queue)[:10]): # Show top 10
-            msg += f"{i+1}. {query}\n"
-        
-        if len(self.queue) > 10:
-            msg += f"...and {len(self.queue) - 10} more."
-        
-        await ctx.send(msg)
+        if not ctx.voice_client.is_playing():
+            self.play_next(ctx)
 
+    @commands.command(name='search')
+    async def search(self, ctx, *, query):
+        """Searches YouTube and lets you select a song."""
+        if not await self.ensure_voice(ctx):
+            return
+
+        msg = await ctx.send(f"Searching for **{query}**...")
+        results = await YTDLSource.search_source(query, loop=self.bot.loop)
+        
+        if not results:
+            return await msg.edit(content="No results found.")
+        
+        view = SearchView(ctx, results, self)
+        await msg.edit(content="Select a song to play:", view=view)
+
+    # --- Playlist Commands ---
+    @commands.group(name='playlist', invoke_without_command=True)
+    async def playlist(self, ctx):
+        """Playlist management commands."""
+        await ctx.send("Available commands: create, add, remove, list, load, delete, show")
+
+    @playlist.command(name='create')
+    async def pl_create(self, ctx, name: str):
+        """Creates a new empty playlist."""
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** already exists.")
+        
+        with open(filepath, 'w') as f:
+            json.dump([], f)
+        await ctx.send(f"Playlist **{name}** created.")
+
+    @playlist.command(name='add')
+    async def pl_add(self, ctx, name: str, *, song: str):
+        """Adds a song (URL/Query) to a playlist."""
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if not os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** not found.")
+        
+        with open(filepath, 'r') as f:
+            tracks = json.load(f)
+        
+        tracks.append(song)
+        
+        with open(filepath, 'w') as f:
+            json.dump(tracks, f)
+        await ctx.send(f"Added **{song}** to playlist **{name}**.")
+
+    @playlist.command(name='list')
+    async def pl_list(self, ctx):
+        """Lists all saved playlists."""
+        files = [f[:-5] for f in os.listdir(self.playlist_dir) if f.endswith('.json')]
+        if not files:
+            return await ctx.send("No playlists found.")
+        await ctx.send(f"**Saved Playlists:**\n" + "\n".join(files))
+
+    @playlist.command(name='load')
+    async def pl_load(self, ctx, name: str):
+        """Loads a playlist into the queue."""
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if not os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** not found.")
+        
+        if not await self.ensure_voice(ctx):
+            return
+
+        with open(filepath, 'r') as f:
+            tracks = json.load(f)
+        
+        for track in tracks:
+            self.queue.append((track, ctx.author.id))
+        
+        await ctx.send(f"Loaded {len(tracks)} songs from **{name}**.")
+        if not ctx.voice_client.is_playing():
+            self.play_next(ctx)
+
+    @playlist.command(name='delete')
+    async def pl_delete(self, ctx, name: str):
+        """Deletes a playlist."""
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if not os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** not found.")
+        os.remove(filepath)
+        await ctx.send(f"Playlist **{name}** deleted.")
+
+    # --- Standard Controls ---
     @commands.command(name='skip', aliases=['s'])
     async def skip(self, ctx):
-        """Skips the current song."""
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("Skipped.")
 
     @commands.command(name='stop')
     async def stop(self, ctx):
-        """Stops playback and clears queue."""
         self.queue.clear()
         if ctx.voice_client:
             ctx.voice_client.stop()
-        await ctx.send("Stopped and queue cleared.")
+        await ctx.send("Stopped.")
 
-    @commands.command(name='leave', aliases=['disconnect'])
-    async def leave(self, ctx):
-        """Disconnects the bot."""
-        if ctx.voice_client:
-            await ctx.voice_client.disconnect()
-            await ctx.send("Disconnected.")
-
-    @commands.command(name='loop')
-    async def loop(self, ctx):
-        """Toggles loop mode (repeats the current song)."""
-        self.is_looping = not self.is_looping
-        await ctx.send(f"Looping is now **{'ON' if self.is_looping else 'OFF'}**.")
+    @commands.command(name='queue', aliases=['q'])
+    async def queue_info(self, ctx):
+        if len(self.queue) == 0:
+            return await ctx.send("Queue is empty.")
+        msg = "**Queue:**\n"
+        for i, (query, _) in enumerate(list(self.queue)[:10]):
+            msg += f"{i+1}. {query}\n"
+        if len(self.queue) > 10:
+            msg += f"...and {len(self.queue) - 10} more."
+        await ctx.send(msg)
 
     @commands.command(name='shuffle')
     async def shuffle(self, ctx):
-        """Shuffles the current queue."""
         if len(self.queue) < 2:
-            return await ctx.send("Not enough songs to shuffle.")
-        
-        # Create a list from deque, shuffle, recreate deque
-        temp_list = list(self.queue)
-        random.shuffle(temp_list)
-        self.queue = deque(temp_list)
+            return await ctx.send("Not enough songs.")
+        temp = list(self.queue)
+        random.shuffle(temp)
+        self.queue = deque(temp)
         await ctx.send("Queue shuffled.")
+
+    @commands.command(name='loop')
+    async def loop(self, ctx):
+        self.is_looping = not self.is_looping
+        await ctx.send(f"Loop: **{self.is_looping}**")
 
     @commands.command(name='radio')
     async def radio(self, ctx, *, genre="lofi"):
-        """Plays a radio stream (defaults to Lofi Girl or searches genre)."""
-        # Basic implementation: Search for "genre radio live" on YouTube
         query = f"{genre} radio live"
         await self.play(ctx, query=query)
 
-    @commands.command(name='save')
-    async def save_playlist(self, ctx, name: str):
-        """Saves the current queue to a playlist."""
-        if not self.queue:
-            return await ctx.send("Queue is empty, nothing to save.")
-        
-        import json
-        playlist_data = list(self.queue)
-        # We only save the query/url, not the requester for simplicity in this prototype
-        tracks = [q[0] for q in playlist_data]
-        
-        filepath = os.path.join('data', f'{name}.json')
-        try:
-            with open(filepath, 'w') as f:
-                json.dump(tracks, f)
-            await ctx.send(f"Playlist **{name}** saved with {len(tracks)} songs.")
-        except Exception as e:
-            await ctx.send(f"Error saving playlist: {e}")
-
-    @commands.command(name='load')
-    async def load_playlist(self, ctx, name: str):
-        """Loads a playlist into the queue."""
-        filepath = os.path.join('data', f'{name}.json')
-        if not os.path.exists(filepath):
-            return await ctx.send(f"Playlist **{name}** not found.")
-        
-        import json
-        try:
-            with open(filepath, 'r') as f:
-                tracks = json.load(f)
-            
-            for track in tracks:
-                self.queue.append((track, ctx.author.id))
-            
-            await ctx.send(f"Loaded {len(tracks)} songs from **{name}**.")
-            
-            if not ctx.voice_client or not ctx.voice_client.is_playing():
-                 # If bot is idle, start playing
-                if ctx.author.voice:
-                     if not ctx.voice_client:
-                         await ctx.author.voice.channel.connect()
-                     self.play_next(ctx)
-        except Exception as e:
-            await ctx.send(f"Error loading playlist: {e}")
+    @commands.command(name='leave')
+    async def leave(self, ctx):
+        if ctx.voice_client:
+            await ctx.voice_client.disconnect()
 
 async def setup(bot):
     await bot.add_cog(Music(bot))
+

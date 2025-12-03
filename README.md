@@ -57,6 +57,7 @@ python main.py
 ## Commands
 
 *   `!play <url|search>`: Play a song or add to queue. Supports Spotify links.
+*   `!search <query>`: **NEW!** Interactive search. Returns a dropdown menu of top 5 results to choose from.
 *   `!skip`: Skip current song.
 *   `!stop`: Stop playing and clear queue.
 *   `!queue`: Show current queue.
@@ -64,6 +65,13 @@ python main.py
 *   `!loop`: Toggle loop mode.
 *   `!radio <genre>`: Play a radio stream (default: lofi).
 *   `!leave`: Disconnect the bot.
+
+### Playlist Management
+*   `!playlist create <name>`: Create a new empty playlist.
+*   `!playlist add <name> <song>`: Add a song (URL or query) to a playlist.
+*   `!playlist load <name>`: Load a playlist into the current queue.
+*   `!playlist list`: Show all saved playlists.
+*   `!playlist delete <name>`: Delete a playlist.
 
 ## Disclaimer
 

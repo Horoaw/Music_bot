@@ -18,3 +18,22 @@ venv/
 *.mp3
 *.webm
 downloads/
+
+# AI/ML related files and directories
+*.pt
+*.pth
+*.h5
+*.onnx
+*.tflite
+*.weights
+*.bin
+*.pkl
+*.joblib
+runs/
+logs/
+checkpoints/
+data/*.csv
+data/*.json # If data dir is used for large datasets
+wandb/
+mlruns/
+.ipynb_checkpoints/
