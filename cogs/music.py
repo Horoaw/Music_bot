@@ -206,9 +206,9 @@ class Music(commands.Cog):
                 return False
         return True
 
-    @commands.command(name='play', aliases=['p'])
-    async def play(self, ctx, *, query):
-        """Plays a song or adds to queue (URL or Search)."""
+    @commands.hybrid_command(name='play', aliases=['p'], description="Plays a song or adds to queue (URL or Search).")
+    @app_commands.describe(query="The song URL or search term.")
+    async def play(self, ctx: commands.Context, *, query: str):
         if not await self.ensure_voice(ctx):
             return
 
@@ -227,9 +227,9 @@ class Music(commands.Cog):
         if not ctx.voice_client.is_playing():
             await self.play_next(ctx)
 
-    @commands.command(name='search')
-    async def search(self, ctx, *, query):
-        """Searches YouTube and lets you select a song."""
+    @commands.hybrid_command(name='search', description="Searches YouTube and lets you select a song.")
+    @app_commands.describe(query="The search term for YouTube.")
+    async def search(self, ctx: commands.Context, *, query: str):
         if not await self.ensure_voice(ctx):
             return
 
@@ -246,14 +246,13 @@ class Music(commands.Cog):
         await msg.edit(content="Select a song to play:", view=view)
 
     # --- Playlist Commands ---
-    @commands.group(name='playlist', invoke_without_command=True)
-    async def playlist(self, ctx):
-        """Playlist management commands."""
+    @commands.hybrid_group(name='playlist', description="Playlist management commands.")
+    async def playlist(self, ctx: commands.Context):
         await ctx.send("Available commands: create, add, remove, list, load, delete, show")
 
-    @playlist.command(name='create')
-    async def pl_create(self, ctx, name: str):
-        """Creates a new empty playlist."""
+    @playlist.command(name='create', description="Creates a new empty playlist.")
+    @app_commands.describe(name="The name of the playlist to create.")
+    async def pl_create(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** already exists.")
@@ -262,9 +261,9 @@ class Music(commands.Cog):
             json.dump([], f)
         await ctx.send(f"Playlist **{name}** created.")
 
-    @playlist.command(name='add')
-    async def pl_add(self, ctx, name: str, *, song: str):
-        """Adds a song (URL/Query) to a playlist."""
+    @playlist.command(name='add', description="Adds a song (URL/Query) to a playlist.")
+    @app_commands.describe(name="The name of the playlist.", song="The song URL or search term.")
+    async def pl_add(self, ctx: commands.Context, name: str, *, song: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -278,17 +277,16 @@ class Music(commands.Cog):
             json.dump(tracks, f)
         await ctx.send(f"Added **{song}** to playlist **{name}**.")
 
-    @playlist.command(name='list')
-    async def pl_list(self, ctx):
-        """Lists all saved playlists."""
+    @playlist.command(name='list', description="Lists all saved playlists.")
+    async def pl_list(self, ctx: commands.Context):
         files = [f[:-5] for f in os.listdir(self.playlist_dir) if f.endswith('.json')]
         if not files:
             return await ctx.send("No playlists found.")
         await ctx.send(f"**Saved Playlists:**\n" + "\n".join(files))
 
-    @playlist.command(name='load')
-    async def pl_load(self, ctx, name: str):
-        """Loads a playlist into the queue."""
+    @playlist.command(name='load', description="Loads a playlist into the queue.")
+    @app_commands.describe(name="The name of the playlist to load.")
+    async def pl_load(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -306,9 +304,9 @@ class Music(commands.Cog):
         if not ctx.voice_client.is_playing():
             await self.play_next(ctx)
 
-    @playlist.command(name='delete')
-    async def pl_delete(self, ctx, name: str):
-        """Deletes a playlist."""
+    @playlist.command(name='delete', description="Deletes a playlist.")
+    @app_commands.describe(name="The name of the playlist to delete.")
+    async def pl_delete(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -316,21 +314,21 @@ class Music(commands.Cog):
         await ctx.send(f"Playlist **{name}** deleted.")
 
     # --- Standard Controls ---
-    @commands.command(name='skip', aliases=['s'])
-    async def skip(self, ctx):
+    @commands.hybrid_command(name='skip', aliases=['s'], description="Skips the current song.")
+    async def skip(self, ctx: commands.Context):
         if ctx.voice_client and ctx.voice_client.is_playing():
             ctx.voice_client.stop()
             await ctx.send("Skipped.")
 
-    @commands.command(name='stop')
-    async def stop(self, ctx):
+    @commands.hybrid_command(name='stop', description="Stops playback and clears the queue.")
+    async def stop(self, ctx: commands.Context):
         self.queue.clear()
         if ctx.voice_client:
             ctx.voice_client.stop()
         await ctx.send("Stopped.")
 
-    @commands.command(name='queue', aliases=['q'])
-    async def queue_info(self, ctx):
+    @commands.hybrid_command(name='queue', aliases=['q'], description="Displays the current queue.")
+    async def queue_info(self, ctx: commands.Context):
         if len(self.queue) == 0:
             return await ctx.send("Queue is empty.")
         msg = "**Queue:**\n"
@@ -340,8 +338,8 @@ class Music(commands.Cog):
             msg += f"...and {len(self.queue) - 10} more."
         await ctx.send(msg)
 
-    @commands.command(name='shuffle')
-    async def shuffle(self, ctx):
+    @commands.hybrid_command(name='shuffle', description="Shuffles the current queue.")
+    async def shuffle(self, ctx: commands.Context):
         if len(self.queue) < 2:
             return await ctx.send("Not enough songs.")
         temp = list(self.queue)
@@ -349,18 +347,19 @@ class Music(commands.Cog):
         self.queue = deque(temp)
         await ctx.send("Queue shuffled.")
 
-    @commands.command(name='loop')
-    async def loop(self, ctx):
+    @commands.hybrid_command(name='loop', description="Toggles loop mode for the current song.")
+    async def loop(self, ctx: commands.Context):
         self.is_looping = not self.is_looping
         await ctx.send(f"Loop: **{self.is_looping}**")
 
-    @commands.command(name='radio')
-    async def radio(self, ctx, *, genre="lofi"):
+    @commands.hybrid_command(name='radio', description="Plays a radio stream.")
+    @app_commands.describe(genre="The genre of the radio to play (e.g., lofi, jazz).")
+    async def radio(self, ctx: commands.Context, *, genre: str = "lofi"):
         query = f"{genre} radio live"
         await self.play(ctx, query=query)
 
-    @commands.command(name='leave')
-    async def leave(self, ctx):
+    @commands.hybrid_command(name='leave', description="Disconnects the bot from the voice channel.")
+    async def leave(self, ctx: commands.Context):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
 
