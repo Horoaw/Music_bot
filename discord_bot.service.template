@@ -1,0 +1,26 @@
+[Unit]
+Description=Discord Music Bot Service
+After=network.target
+
+[Service]
+# 修改为你的 Linux 用户名
+User=root
+Group=root
+
+# 修改为你的项目实际路径
+WorkingDirectory=/path/to/your/discord_song_bot
+
+# 关键：使用 Conda 环境中的 Python 解释器绝对路径
+# 假设你的 conda 环境名为 discord_music_bot
+# 你可以通过在服务器运行 `conda run -n discord_music_bot which python` 找到这个路径
+ExecStart=/root/anaconda3/envs/discord_music_bot/bin/python main.py
+
+# 自动重启配置
+Restart=always
+RestartSec=10
+
+# 环境变量加载（如果 .env 文件在项目根目录下，Python 代码会自动加载，这里可选）
+# EnvironmentFile=/path/to/your/discord_song_bot/.env
+
+[Install]
+WantedBy=multi-user.target
