@@ -18,7 +18,7 @@ class MusicBot(commands.Bot):
         super().__init__(
             command_prefix=commands.when_mentioned_or("!"),
             intents=intents,
-            help_command=commands.DefaultHelpCommand(),
+            help_command=None,
             case_insensitive=True
         )
 
@@ -48,39 +48,48 @@ class MusicBot(commands.Bot):
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')
+        print("Note: Global slash commands may take up to an hour to appear.")
+        print(f"Invite URL (Ensure 'applications.commands' is checked!):")
+        print(f"https://discord.com/api/oauth2/authorize?client_id={self.user.id}&permissions=8&scope=bot%20applications.commands")
+        print('------')
 
-    @commands.command(name='sync', description="Syncs slash commands. Use `!sync ~` to sync to current guild, `!sync *` to copy all global app commands to current guild and sync, `!sync ^` to clear all commands from the current guild and sync.")
-    @commands.is_owner() # Only bot owner can use this
-    async def sync_commands(self, ctx: commands.Context, guild_id: int = None, spec: str = "~"):
-        guild = None
-        if guild_id:
-            guild = self.get_guild(guild_id)
-            if not guild:
-                return await ctx.send(f"Guild with ID {guild_id} not found.")
+    @commands.command(name='sync', description="Syncs slash commands.")
+    @commands.has_permissions(administrator=True)
+    async def sync_commands(self, ctx: commands.Context, spec: str = "~"):
+        await ctx.send(f"🔄 Processing sync request with spec: `{spec}`...")
+        print(f"Sync triggered by {ctx.author} (Spec: {spec})")
+        
+        try:
+            if spec == "~": # Sync to current guild
+                if not ctx.guild:
+                    return await ctx.send("❌ Can only sync to a guild.")
+                
+                # Clear existing guild commands first to ensure a clean slate
+                self.tree.clear_commands(guild=ctx.guild)
+                
+                # Copy global commands to this guild
+                self.tree.copy_global_to(guild=ctx.guild)
+                
+                # Sync
+                synced = await self.tree.sync(guild=ctx.guild)
+                await ctx.send(f"✅ Successfully synced {len(synced)} commands to this server (Instant).")
+                print(f"Synced {len(synced)} commands to guild {ctx.guild.id}.")
+                
+            elif spec == "global": # Sync globally
+                synced = await self.tree.sync()
+                await ctx.send(f"✅ Synced {len(synced)} commands globally (May take 1 hour).")
+                
+            elif spec == "^": # Clear
+                self.tree.clear_commands(guild=ctx.guild)
+                await self.tree.sync(guild=ctx.guild)
+                await ctx.send("✅ Cleared guild commands.")
+            
+            else:
+                await ctx.send("❓ Unknown spec. Use `~` (Guild) or `global`.")
 
-        if spec == "~": # Sync to current guild
-            if not ctx.guild:
-                return await ctx.send("Cannot sync to current guild outside a guild.")
-            self.tree.copy_global_to(guild=ctx.guild)
-            synced = await self.tree.sync(guild=ctx.guild)
-        elif spec == "*": # Copy global to current guild and sync
-            if not ctx.guild:
-                return await ctx.send("Cannot sync to current guild outside a guild.")
-            self.tree.copy_global_to(guild=ctx.guild)
-            synced = await self.tree.sync(guild=ctx.guild)
-        elif spec == "^": # Clear commands from current guild and sync
-            if not ctx.guild:
-                return await ctx.send("Cannot clear commands from current guild outside a guild.")
-            self.tree.clear_commands(guild=ctx.guild)
-            await self.tree.sync(guild=ctx.guild)
-            synced = []
-        elif spec == "global": # Sync globally
-            synced = await self.tree.sync()
-        else:
-            await ctx.send("Invalid sync spec. Use `~` for current guild sync, `*` for global copy+current guild sync, `^` for current guild clear+sync, or `global` for global sync.")
-            return
-
-        await ctx.send(f"Synced {len(synced)} commands {'globally' if spec == 'global' else f'to {guild.name if guild else ctx.guild.name}'}.")
+        except Exception as e:
+            print(f"Sync Error: {e}")
+            await ctx.send(f"❌ Sync failed: {e}")
 
 async def main():
     bot = MusicBot()

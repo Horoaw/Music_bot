@@ -9,9 +9,10 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from collections import deque
 import random
 import json
+import aiohttp
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
-yt_dlp.utils.bug_reports_message = lambda: ''
+yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
@@ -56,7 +57,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     @classmethod
     async def search_source(cls, query, *, loop=None, stream=True):
-        """Searches for a query and returns a list of (title, url, id) tuples for selection."""
+        """Searches for a query and returns a list of (title, url, id, duration) tuples for selection."""
         loop = loop or asyncio.get_event_loop()
         # 'ytsearch5:' gets top 5 results
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
@@ -69,7 +70,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
             results.append({
                 'title': entry.get('title'),
                 'url': entry.get('webpage_url', entry.get('url')),
-                'id': entry.get('id')
+                'id': entry.get('id'),
+                'duration': entry.get('duration', 0)
             })
         return results
 
@@ -80,9 +82,22 @@ class SearchSelect(discord.ui.Select):
         self.results = results
         options = []
         for i, res in enumerate(results):
-            # Limit label size to 100 chars
-            label = f"{i+1}. {res['title']}"[:100]
-            options.append(discord.SelectOption(label=label, value=str(i)))
+            # Format duration
+            seconds = res.get('duration', 0)
+            if seconds:
+                m, s = divmod(seconds, 60)
+                if m >= 60:
+                    h, m = divmod(m, 60)
+                    duration_str = f"{int(h)}:{int(m):02d}:{int(s):02d}"
+                else:
+                    duration_str = f"{int(m)}:{int(s):02d}"
+            else:
+                duration_str = "N/A"
+
+            # Limit label size
+            label = f"{i+1}. {res['title']}"[:90] 
+            description = f"⏱️ {duration_str}"
+            options.append(discord.SelectOption(label=label, description=description, value=str(i)))
 
         super().__init__(placeholder="Select a song to play...", min_values=1, max_values=1, options=options)
 
@@ -206,8 +221,37 @@ class Music(commands.Cog):
                 return False
         return True
 
+    async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        if not current:
+            return []
+        
+        url = f"http://suggestqueries.google.com/complete/search?client=youtube&ds=yt&q={current}"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    text = await response.text()
+                    # Response format is roughly: window.google.ac.h(["query", [["suggestion1", 0], ["suggestion2", 0], ...]])
+                    # But simpler JSON format exists with client=firefox
+                    pass
+                
+        # Better to use client=firefox for standard JSON
+        url = f"http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={current}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = json.loads(await response.text())
+                    # data[0] is query, data[1] is list of suggestions
+                    suggestions = data[1]
+                    return [
+                        app_commands.Choice(name=suggestion, value=suggestion)
+                        for suggestion in suggestions[:25] # Discord limit is 25
+                    ]
+        return []
+
     @commands.hybrid_command(name='play', aliases=['p'], description="Plays a song or adds to queue (URL or Search).")
     @app_commands.describe(query="The song URL or search term.")
+    @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
         if not await self.ensure_voice(ctx):
             return
@@ -362,6 +406,68 @@ class Music(commands.Cog):
     async def leave(self, ctx: commands.Context):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
+
+    @commands.hybrid_command(name='help', description="Shows available commands (English/Chinese). | 显示可用命令 (中/英).")
+    async def help(self, ctx: commands.Context):
+        embed = discord.Embed(
+            title="🎵 Music Bot Help / 音乐机器人帮助",
+            description="Here are the available commands / 以下是可用命令:",
+            color=discord.Color.blue()
+        )
+
+        # General Commands
+        embed.add_field(
+            name="▶️ **!play / !p <url|query>**",
+            value="Plays a song from URL or search term.\n播放链接或搜索关键词对应的歌曲。",
+            inline=False
+        )
+        embed.add_field(
+            name="🔍 **!search <query>**",
+            value="Searches YouTube and lets you select a song.\n搜索 YouTube 并让你选择一首歌曲。",
+            inline=False
+        )
+        embed.add_field(
+            name="⏭️ **!skip / !s**",
+            value="Skips the current song.\n跳过当前播放的歌曲。",
+            inline=False
+        )
+        embed.add_field(
+            name="⏹️ **!stop**",
+            value="Stops playback and clears the queue.\n停止播放并清空播放队列。",
+            inline=False
+        )
+        embed.add_field(
+            name="📜 **!queue / !q**",
+            value="Displays the current song queue.\n显示当前的播放队列。",
+            inline=False
+        )
+        embed.add_field(
+            name="🔀 **!shuffle**",
+            value="Shuffles the current queue.\n随机打乱播放队列。",
+            inline=False
+        )
+        embed.add_field(
+            name="🔁 **!loop**",
+            value="Toggles loop mode for the current song.\n切换当前歌曲的循环模式。",
+            inline=False
+        )
+        embed.add_field(
+            name="📻 **!radio [genre]**",
+            value="Plays a live radio stream (default: lofi).\n播放直播电台 (默认: lofi)。",
+            inline=False
+        )
+        embed.add_field(
+            name="📂 **!playlist**",
+            value="Playlist commands: `create`, `add`, `remove`, `list`, `load`, `delete`.\n播放列表命令: `create`, `add`, `remove`, `list`, `load`, `delete`。",
+            inline=False
+        )
+        embed.add_field(
+            name="🚪 **!leave**",
+            value="Disconnects the bot from the voice channel.\n断开机器人与语音频道的连接。",
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
 
 async def setup(bot):
     await bot.add_cog(Music(bot))

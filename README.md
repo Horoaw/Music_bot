@@ -1,78 +1,106 @@
-# Discord Music Bot
+# 🎵 Discord Music Bot / 音乐机器人
 
-A robust, open-source Discord music bot built with Python, `discord.py`, and `yt-dlp`.
+A feature-rich, open-source Discord music bot built with Python, `discord.py`, and `yt-dlp`.  
+基于 Python, `discord.py` 和 `yt-dlp` 构建的功能丰富的开源 Discord 音乐机器人。
 
-## Features
+## ✨ Features / 功能特性
 
-*   **Multi-Source Support:** YouTube, SoundCloud, Direct URLs (MP3/FLAC/etc.).
-*   **Spotify Integration:** Paste Spotify Track/Album/Playlist links (Bot searches for them on YouTube automatically).
-*   **Radio Mode:** Play live radio streams.
-*   **Queue System:** Enqueue, skip, stop, shuffle, loop.
-*   **24/7 Capability:** The bot stays in the channel until you explicitly disconnect it.
+*   **🎶 High Quality Playback**: Streams audio from YouTube, SoundCloud, and direct URL sources.
+*   **🟢 Spotify Support**: Seamlessly handles Spotify Track, Album, and Playlist links (auto-converts to YouTube queries).
+*   **🤖 Slash Commands**: Full support for `/play`, `/search`, and more with autocomplete suggestions.
+*   **🔍 Smart Search**: 
+    *   `/play`: Type to get real-time search suggestions from YouTube.
+    *   `/search`: Select from top 5 results with video duration displayed.
+*   **📂 Playlist Management**: Create, save, and load your own custom playlists.
+*   **📻 Radio Mode**: Listen to live 24/7 radio streams (Lofi, Jazz, etc.).
+*   **🌐 Bilingual Support**: Help command available in both English and Chinese.
 
-## Setup
+## 🛠️ Setup / 安装指南
 
-### Prerequisites
+### Prerequisites / 前置要求
 
-1.  **Python 3.9+** or **Conda**.
-2.  **FFmpeg** installed and added to your system PATH.
-    *   Linux: `sudo apt install ffmpeg`
-    *   Windows: Download and add `bin` folder to Path.
+1.  **Python 3.10+**
+2.  **FFmpeg**: Essential for audio processing.
+    *   **Linux**: `sudo apt install ffmpeg`
+    *   **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to your PATH.
 
-### Installation
+### Installation / 安装步骤
 
-1.  **Clone the repository:**
+1.  **Clone the repository / 克隆仓库:**
     ```bash
-    git clone git@github.com:Horoaw/Music_bot.git
-    cd Music_bot
+    git clone <repository_url>
+    cd discord_song_bot
     ```
 
-2.  **Set up Environment:**
-
-    *   **Using Conda:**
-        ```bash
-        conda env create -f environment.yml
-        conda activate discord_music_bot
-        ```
+2.  **Install Dependencies / 安装依赖:**
     
-    *   **Using Pip:**
-        ```bash
-        pip install discord.py yt-dlp spotipy python-dotenv PyNaCl
-        ```
+    Using Conda (Recommended):
+    ```bash
+    conda env create -f environment.yml
+    conda activate discord_music_bot
+    ```
+    
+    Or using pip:
+    ```bash
+    pip install discord.py[voice] yt-dlp spotipy python-dotenv aiohttp
+    ```
 
-3.  **Configuration:**
-    *   Rename `.env` (or create it) and fill in your credentials:
-        ```env
-        DISCORD_TOKEN=your_bot_token_here
-        SPOTIPY_CLIENT_ID=your_spotify_id (Optional)
-        SPOTIPY_CLIENT_SECRET=your_spotify_secret (Optional)
-        ```
+3.  **Configuration / 配置:**
+    Create a `.env` file in the project root:
+    ```env
+    DISCORD_TOKEN=your_discord_bot_token
+    SPOTIPY_CLIENT_ID=your_spotify_client_id  # Optional / 可选
+    SPOTIPY_CLIENT_SECRET=your_spotify_client_secret # Optional / 可选
+    ```
 
-### Running the Bot
+4.  **Permissions / 权限设置:**
+    *   Go to Discord Developer Portal -> Bot.
+    *   Enable **Message Content Intent** (Required for traditional `!` commands to work).
+    *   Ensure the bot invite includes `applications.commands` scope.
+
+### Running the Bot / 运行机器人
 
 ```bash
 python main.py
 ```
 
-## Commands
+## 🎮 Usage / 使用方法
 
-*   `!play <url|search>`: Play a song or add to queue. Supports Spotify links.
-*   `!search <query>`: **NEW!** Interactive search. Returns a dropdown menu of top 5 results to choose from.
-*   `!skip`: Skip current song.
-*   `!stop`: Stop playing and clear queue.
-*   `!queue`: Show current queue.
-*   `!shuffle`: Shuffle the queue.
-*   `!loop`: Toggle loop mode.
-*   `!radio <genre>`: Play a radio stream (default: lofi).
-*   `!leave`: Disconnect the bot.
+### 🔄 First Time Setup / 首次设置
+After starting the bot, run this command in your server to register Slash Commands immediately:
+```
+!sync ~
+```
 
-### Playlist Management
-*   `!playlist create <name>`: Create a new empty playlist.
-*   `!playlist add <name> <song>`: Add a song (URL or query) to a playlist.
-*   `!playlist load <name>`: Load a playlist into the current queue.
-*   `!playlist list`: Show all saved playlists.
-*   `!playlist delete <name>`: Delete a playlist.
+### 📜 Commands / 命令列表
 
-## Disclaimer
+| Command / 命令 | Description / 描述 |
+| :--- | :--- |
+| **`/play <query>`** | Play a song via URL or search term (with autocomplete). <br> 播放链接或搜索关键词（支持自动补全）。 |
+| **`/search <query>`** | Search YouTube and select from a list (shows duration). <br> 搜索 YouTube 并选择歌曲（显示时长）。 |
+| **`/stop`** | Stop playback and clear queue. <br> 停止播放并清空队列。 |
+| **`/skip`** | Skip the current song. <br> 跳过当前歌曲。 |
+| **`/queue`** | Show the current play queue. <br> 显示当前播放队列。 |
+| **`/shuffle`** | Shuffle the queue. <br> 随机打乱队列。 |
+| **`/loop`** | Toggle loop for current song. <br> 切换单曲循环。 |
+| **`/radio [genre]`** | Play a live radio (default: lofi). <br> 播放电台（默认：lofi）。 |
+| **`/help`** | Show bilingual help menu. <br> 显示双语帮助菜单。 |
+| **`/leave`** | Disconnect from voice channel. <br> 断开语音连接。 |
 
-This bot uses `yt-dlp` to stream audio. Ensure you comply with the Terms of Service of the platforms you access.
+### 📂 Playlist Commands / 播放列表
+
+*   `/playlist create <name>`: Create a new playlist.
+*   `/playlist add <name> <song>`: Add current song/url to playlist.
+*   `/playlist load <name>`: Load playlist to queue.
+*   `/playlist list`: List all playlists.
+*   `/playlist delete <name>`: Delete a playlist.
+
+## ⚠️ Troubleshooting / 故障排除
+
+*   **"PrivilegedIntentsRequired" Error**:
+    *   Go to Discord Developer Portal -> Bot -> Privileged Gateway Intents -> Enable "Message Content Intent".
+*   **Slash commands not appearing?**:
+    *   Run `!sync ~` in your server.
+    *   Re-invite the bot using the URL printed in the console at startup.
+*   **Spotify links not working?**:
+    *   Ensure `SPOTIPY_CLIENT_ID` and `SPOTIPY_CLIENT_SECRET` are set in your `.env` file.
