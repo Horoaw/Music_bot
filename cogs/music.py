@@ -228,7 +228,15 @@ class Music(commands.Cog):
     async def ensure_voice(self, ctx):
         if not ctx.voice_client:
             if ctx.author.voice:
-                await ctx.author.voice.channel.connect()
+                try:
+                    # Connect with self_deaf=True and increased timeout
+                    await ctx.author.voice.channel.connect(self_deaf=True, timeout=60.0)
+                except asyncio.TimeoutError:
+                    await ctx.send("Error: Connection to voice channel timed out. (Discord Voice Server might be unreachable)")
+                    return False
+                except Exception as e:
+                    await ctx.send(f"Error connecting to voice channel: {e}")
+                    return False
             else:
                 await ctx.send("You are not connected to a voice channel.")
                 return False
