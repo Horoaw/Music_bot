@@ -32,6 +32,19 @@ class MusicBot(commands.Bot):
         # Sync slash commands (optional, useful for hybrid commands)
         # await self.tree.sync() 
 
+    async def on_command_error(self, ctx, error):
+        """Global error handler."""
+        if isinstance(error, commands.CommandNotFound):
+            return # Ignore unknown commands
+        elif isinstance(error, commands.MissingRequiredArgument):
+            await ctx.send("Missing required arguments.")
+        elif isinstance(error, commands.CommandInvokeError):
+            await ctx.send(f"Error executing command: {error.original}")
+            print(f"Command Error: {error}")
+        else:
+            await ctx.send(f"An error occurred: {error}")
+            print(f"Unhandled Error: {error}")
+
     async def on_ready(self):
         print(f'Logged in as {self.user} (ID: {self.user.id})')
         print('------')

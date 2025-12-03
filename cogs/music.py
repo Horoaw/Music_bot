@@ -157,33 +157,45 @@ class Music(commands.Cog):
             print(f"Error fetching Spotify tracks: {e}")
         return results
 
-    def play_next(self, ctx):
+    async def play_next(self, ctx):
         if self.is_looping and self.current_song:
+            # Re-queue the current song query
             self.queue.appendleft(self.current_song)
 
         if len(self.queue) > 0:
             if self.is_shuffling:
-                # Simple shuffle: pick random index
-                # Note: Real shuffle rearranges the queue, here we just PICK randomly for next
-                # But 'shuffle' command physically rearranges queue, so we can just popleft
+                # Shuffle logic remains simple for now
                 pass 
             
             query, requester = self.queue.popleft()
             self.current_song = (query, requester)
             
-            coro = YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
-            future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
-            
             try:
-                player = future.result()
-                ctx.voice_client.play(player, after=lambda e: self.play_next(ctx))
-                asyncio.run_coroutine_threadsafe(ctx.send(f'Now playing: **{player.title}**'), self.bot.loop)
+                # Ensure we are still connected
+                if not ctx.voice_client:
+                    return
+
+                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
+                
+                # Define the callback to run when the song finishes
+                def after_playing(error):
+                    if error:
+                        print(f"Player error: {error}")
+                        self.bot.loop.create_task(ctx.send(f"Player error: {error}"))
+                    # Schedule the next song
+                    self.bot.loop.create_task(self.play_next(ctx))
+
+                ctx.voice_client.play(source, after=after_playing)
+                await ctx.send(f'Now playing: **{source.title}**')
+            
             except Exception as e:
+                await ctx.send(f"Error playing **{query}**: {e}")
                 print(f"Error playing {query}: {e}")
-                self.play_next(ctx)
+                # Recursively try the next song
+                await self.play_next(ctx)
         else:
             self.current_song = None
-            asyncio.run_coroutine_threadsafe(ctx.send("Queue finished."), self.bot.loop)
+            await ctx.send("Queue finished.")
 
     async def ensure_voice(self, ctx):
         if not ctx.voice_client:
@@ -213,7 +225,7 @@ class Music(commands.Cog):
             await ctx.send(f"Added to queue: {query}")
 
         if not ctx.voice_client.is_playing():
-            self.play_next(ctx)
+            await self.play_next(ctx)
 
     @commands.command(name='search')
     async def search(self, ctx, *, query):
@@ -222,7 +234,10 @@ class Music(commands.Cog):
             return
 
         msg = await ctx.send(f"Searching for **{query}**...")
-        results = await YTDLSource.search_source(query, loop=self.bot.loop)
+        try:
+            results = await YTDLSource.search_source(query, loop=self.bot.loop)
+        except Exception as e:
+             return await msg.edit(content=f"Error searching: {e}")
         
         if not results:
             return await msg.edit(content="No results found.")
@@ -289,7 +304,7 @@ class Music(commands.Cog):
         
         await ctx.send(f"Loaded {len(tracks)} songs from **{name}**.")
         if not ctx.voice_client.is_playing():
-            self.play_next(ctx)
+            await self.play_next(ctx)
 
     @playlist.command(name='delete')
     async def pl_delete(self, ctx, name: str):
