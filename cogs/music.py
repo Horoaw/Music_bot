@@ -294,6 +294,38 @@ class Music(commands.Cog):
     async def playlist(self, ctx: commands.Context):
         await ctx.send("Available commands: create, add, remove, list, load, delete, show")
 
+    async def playlist_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        playlists = [f[:-5] for f in os.listdir(self.playlist_dir) if f.endswith('.json')]
+        return [
+            app_commands.Choice(name=pl, value=pl)
+            for pl in playlists if current.lower() in pl.lower()
+        ][:25]
+
+    async def playlist_song_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
+        # Try to get the playlist name from the other options
+        playlist_name = interaction.namespace.name
+        if not playlist_name:
+            return []
+        
+        filepath = os.path.join(self.playlist_dir, f"{playlist_name}.json")
+        if not os.path.exists(filepath):
+            return []
+        
+        try:
+            with open(filepath, 'r') as f:
+                tracks = json.load(f)
+        except:
+            return []
+            
+        choices = []
+        for i, song in enumerate(tracks):
+            # Format: "1. Song Title..."
+            label = f"{i+1}. {song}"[:100]
+            if current.lower() in label.lower():
+                choices.append(app_commands.Choice(name=label, value=i+1))
+        
+        return choices[:25]
+
     @playlist.command(name='create', description="Creates a new empty playlist.")
     @app_commands.describe(name="The name of the playlist to create.")
     async def pl_create(self, ctx: commands.Context, name: str):
@@ -307,6 +339,7 @@ class Music(commands.Cog):
 
     @playlist.command(name='add', description="Adds a song (URL/Query) to a playlist.")
     @app_commands.describe(name="The name of the playlist.", song="The song URL or search term.")
+    @app_commands.autocomplete(name=playlist_autocomplete, song=play_autocomplete)
     async def pl_add(self, ctx: commands.Context, name: str, *, song: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
@@ -330,6 +363,7 @@ class Music(commands.Cog):
 
     @playlist.command(name='load', description="Loads a playlist into the queue.")
     @app_commands.describe(name="The name of the playlist to load.")
+    @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_load(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
@@ -350,6 +384,7 @@ class Music(commands.Cog):
 
     @playlist.command(name='delete', description="Deletes a playlist.")
     @app_commands.describe(name="The name of the playlist to delete.")
+    @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_delete(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
@@ -359,6 +394,7 @@ class Music(commands.Cog):
 
     @playlist.command(name='show', description="Shows the songs in a playlist.")
     @app_commands.describe(name="The name of the playlist.")
+    @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_show(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
@@ -380,6 +416,7 @@ class Music(commands.Cog):
 
     @playlist.command(name='remove', description="Removes a song from a playlist by index.")
     @app_commands.describe(name="The name of the playlist.", index="The index of the song to remove.")
+    @app_commands.autocomplete(name=playlist_autocomplete, index=playlist_song_autocomplete)
     async def pl_remove_song(self, ctx: commands.Context, name: str, index: int):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
