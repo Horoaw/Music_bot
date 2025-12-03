@@ -90,7 +90,7 @@ After starting the bot, run this command in your server to register Slash Comman
 ### 📂 Playlist Commands / 播放列表
 
 *   `/playlist create <name>`: Create a new playlist. <br> 创建一个新歌单。
-*   `/playlist add <name> <song_query>`: Add single song, YouTube playlist URL, or Spotify URL to playlist. <br> 添加单曲、YouTube 播放列表链接或 Spotify 链接到歌单。
+*   `/playlist add <name> <song_query>`: Add single/multiple songs (comma/pipe separated), YouTube playlist URL, or Spotify URL to playlist. <br> 添加单曲/多首歌曲（逗号或竖线分隔）、YouTube 播放列表链接或 Spotify 链接到歌单。
 *   `/playlist show <name>`: Show all songs in a playlist with indices. <br> 显示歌单所有歌曲（带序号）。
 *   `/playlist remove <name> <index>`: Remove a song from a playlist by index. <br> 根据序号从歌单中移除歌曲。
 *   `/playlist load <name>`: Load playlist to queue. <br> 将歌单加载到播放队列。
