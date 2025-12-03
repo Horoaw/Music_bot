@@ -10,9 +10,22 @@ from collections import deque
 import random
 import json
 import aiohttp
+import sys
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
+
+# Helper to find ffmpeg executable in current environment
+def get_ffmpeg_exe():
+    # Check inside the current Python environment (e.g., Conda/Venv bin directory)
+    possible_path = os.path.join(os.path.dirname(sys.executable), 'ffmpeg')
+    if os.path.exists(possible_path) and os.access(possible_path, os.X_OK):
+        return possible_path
+    # Fallback to system PATH
+    return 'ffmpeg'
+
+ffmpeg_executable = get_ffmpeg_exe()
+print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
 ytdl_format_options = {
     'format': 'bestaudio/best',
@@ -53,7 +66,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             data = data['entries'][0]
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_options), data=data)
+        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **ffmpeg_options), data=data)
 
     @classmethod
     async def search_source(cls, query, *, loop=None, stream=True):
