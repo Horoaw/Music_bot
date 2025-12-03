@@ -357,6 +357,46 @@ class Music(commands.Cog):
         os.remove(filepath)
         await ctx.send(f"Playlist **{name}** deleted.")
 
+    @playlist.command(name='show', description="Shows the songs in a playlist.")
+    @app_commands.describe(name="The name of the playlist.")
+    async def pl_show(self, ctx: commands.Context, name: str):
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if not os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** not found.")
+        
+        with open(filepath, 'r') as f:
+            tracks = json.load(f)
+        
+        if not tracks:
+            return await ctx.send(f"Playlist **{name}** is empty.")
+        
+        msg = f"**Playlist {name}:**\n"
+        for i, song in enumerate(tracks):
+            msg += f"{i+1}. {song}\n"
+            if len(msg) > 1900:
+                msg += "...(truncated)"
+                break
+        await ctx.send(msg)
+
+    @playlist.command(name='remove', description="Removes a song from a playlist by index.")
+    @app_commands.describe(name="The name of the playlist.", index="The index of the song to remove.")
+    async def pl_remove_song(self, ctx: commands.Context, name: str, index: int):
+        filepath = os.path.join(self.playlist_dir, f"{name}.json")
+        if not os.path.exists(filepath):
+            return await ctx.send(f"Playlist **{name}** not found.")
+        
+        with open(filepath, 'r') as f:
+            tracks = json.load(f)
+        
+        if index < 1 or index > len(tracks):
+            return await ctx.send(f"Invalid index. Use `/playlist show {name}` to check indices.")
+        
+        removed = tracks.pop(index - 1)
+        
+        with open(filepath, 'w') as f:
+            json.dump(tracks, f)
+        await ctx.send(f"Removed **{removed}** from playlist **{name}**.")
+
     # --- Standard Controls ---
     @commands.hybrid_command(name='skip', aliases=['s'], description="Skips the current song.")
     async def skip(self, ctx: commands.Context):
