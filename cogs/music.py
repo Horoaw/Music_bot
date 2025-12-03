@@ -266,6 +266,7 @@ class Music(commands.Cog):
     @app_commands.describe(query="The song URL or search term.")
     @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
+        await ctx.defer() # Defer immediately to prevent timeout
         if not await self.ensure_voice(ctx):
             return
 
@@ -287,6 +288,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name='search', description="Searches YouTube and lets you select a song.")
     @app_commands.describe(query="The search term for YouTube.")
     async def search(self, ctx: commands.Context, *, query: str):
+        await ctx.defer() # Defer immediately
         if not await self.ensure_voice(ctx):
             return
 
@@ -354,6 +356,7 @@ class Music(commands.Cog):
     @app_commands.describe(name="The name of the playlist.", song_query="URLs/Terms (separate with comma for multiple), or a Playlist URL.")
     @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_add(self, ctx: commands.Context, name: str, *, song_query: str):
+        await ctx.defer() # Defer immediately
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -430,6 +433,7 @@ class Music(commands.Cog):
     @app_commands.describe(name="The name of the playlist to load.")
     @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_load(self, ctx: commands.Context, name: str):
+        await ctx.defer() # Defer immediately
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -541,6 +545,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name='radio', description="Plays a radio stream.")
     @app_commands.describe(genre="The genre of the radio to play (e.g., lofi, jazz).")
     async def radio(self, ctx: commands.Context, *, genre: str = "lofi"):
+        await ctx.defer() # Defer immediately
         query = f"{genre} radio live"
         await self.play(ctx, query=query)
 
