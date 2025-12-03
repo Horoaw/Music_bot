@@ -89,11 +89,13 @@ After starting the bot, run this command in your server to register Slash Comman
 
 ### 📂 Playlist Commands / 播放列表
 
-*   `/playlist create <name>`: Create a new playlist.
-*   `/playlist add <name> <song>`: Add current song/url to playlist.
-*   `/playlist load <name>`: Load playlist to queue.
-*   `/playlist list`: List all playlists.
-*   `/playlist delete <name>`: Delete a playlist.
+*   `/playlist create <name>`: Create a new playlist. <br> 创建一个新歌单。
+*   `/playlist add <name> <song>`: Add current song/url to playlist. <br> 添加当前歌曲/链接到歌单。
+*   `/playlist show <name>`: Show all songs in a playlist with indices. <br> 显示歌单所有歌曲（带序号）。
+*   `/playlist remove <name> <index>`: Remove a song from a playlist by index. <br> 根据序号从歌单中移除歌曲。
+*   `/playlist load <name>`: Load playlist to queue. <br> 将歌单加载到播放队列。
+*   `/playlist list`: List all playlists. <br> 列出所有歌单。
+*   `/playlist delete <name>`: Delete a playlist. <br> 删除整个歌单。
 
 ## ⚠️ Troubleshooting / 故障排除
 
