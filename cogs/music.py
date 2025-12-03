@@ -38,7 +38,8 @@ ytdl_format_options = {
     'quiet': True,
     'no_warnings': True,
     'default_search': 'auto',
-    'source_address': '0.0.0.0' 
+    'source_address': '0.0.0.0',
+    'cookiefile': 'cookies.txt' # Support for age-restricted content
 }
 
 ffmpeg_options = {
@@ -226,7 +227,11 @@ class Music(commands.Cog):
                 await ctx.send(f'Now playing: **{source.title}**')
             
             except Exception as e:
-                await ctx.send(f"Error playing **{query}**: {e}")
+                error_msg = f"Error playing **{query}**: {e}"
+                if "Sign in to confirm your age" in str(e):
+                    error_msg += "\n⚠️ **Age Restricted Content**: Please upload a `cookies.txt` file to the server root to play this."
+                
+                await ctx.send(error_msg)
                 print(f"Error playing {query}: {e}")
                 # Recursively try the next song
                 await self.play_next(ctx)

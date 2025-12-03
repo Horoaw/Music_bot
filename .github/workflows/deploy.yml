@@ -34,6 +34,10 @@ jobs:
             conda activate discord_music_bot
             conda env update -f environment.yml --prune
             
+            # Force upgrade yt-dlp to fix playback issues
+            echo "⬆️ Upgrading yt-dlp..."
+            pip install -U yt-dlp
+
             # 4. 重启服务
             echo "🚀 Restarting Service..."
             # 如果你的用户不是 root，需要确保该用户有权限执行 sudo systemctl restart
