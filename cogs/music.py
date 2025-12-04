@@ -39,9 +39,13 @@ ytdl_format_options = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'cookiefile': 'cookies.txt', # Support for age-restricted content
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'referer': 'https://www.youtube.com/',
+    'cookiefile': os.path.join(os.getcwd(), 'cookies.txt'), # 使用绝对路径
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['web', 'web_creator'], # 强制使用 Web 客户端，避开 Android
+            'player_skip': ['configs', 'js'],
+        }
+    }
 }
 
 ffmpeg_options = {
