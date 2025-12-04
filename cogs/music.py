@@ -39,13 +39,7 @@ ytdl_format_options = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'cookiefile': os.path.join(os.getcwd(), 'cookies.txt'), # 使用绝对路径
-    'extractor_args': {
-        'youtube': {
-            'player_client': ['web', 'web_creator'], # 强制使用 Web 客户端，避开 Android
-            'player_skip': ['configs', 'js'],
-        }
-    }
+    'cookiefile': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt'), # Robust absolute path to cookies.txt
 }
 
 ffmpeg_options = {
