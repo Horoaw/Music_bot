@@ -49,6 +49,7 @@ ytdl_format_options = {
     'cookiefile': cookie_path,
     'cachedir': False,
     'extractor_args': {'youtube': {'player_client': ['android']}},
+    'force_ipv4': True,
 }
 
 ffmpeg_options = {
@@ -82,20 +83,25 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         if 'http_headers' in data:
             headers = data['http_headers']
-            # Construct header string: "Name: Value\r\nName: Value"
-            header_items = []
-            for key, value in headers.items():
-                header_items.append(f"{key}: {value}")
-            header_str = "\r\n".join(header_items)
+            # Only pass critical headers. FFmpeg can be picky.
+            ua = headers.get('User-Agent')
+            cookie = headers.get('Cookie')
             
-            # Inject -headers before other options. 
-            # FFmpeg requires -headers to be specified BEFORE the input file (-i), which discord.py handles.
-            # We ensure the string is quoted properly for the command line construction if needed, 
-            # though discord.py passes this string to shlex.split usually.
-            if 'before_options' in _ffmpeg_options:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-            else:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+            header_items = []
+            if ua:
+                header_items.append(f"User-Agent: {ua}")
+            if cookie:
+                header_items.append(f"Cookie: {cookie}")
+            
+            if header_items:
+                # FFmpeg expects key: value\r\n key: value\r\n
+                header_str = "\r\n".join(header_items) + "\r\n"
+                
+                # Inject -headers before other options.
+                if 'before_options' in _ffmpeg_options:
+                     _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+                else:
+                     _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
 
         return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **_ffmpeg_options), data=data)
 
