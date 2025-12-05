@@ -11,6 +11,7 @@ import random
 import json
 import aiohttp
 import sys
+import subprocess
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
@@ -26,6 +27,13 @@ def get_ffmpeg_exe():
 
 ffmpeg_executable = get_ffmpeg_exe()
 print(f"Using FFmpeg executable: {ffmpeg_executable}")
+
+# Check for Node.js (Crucial for yt-dlp signature decryption)
+try:
+    node_version = subprocess.check_output(["node", "--version"], text=True).strip()
+    print(f"Node.js found: {node_version}")
+except (FileNotFoundError, subprocess.CalledProcessError):
+    print("WARNING: Node.js NOT found in PATH. Protected videos (e.g., Vevo) will likely FAIL with 403 errors.")
 
 cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
 print(f"Looking for cookies at: {cookie_path}")
@@ -48,7 +56,7 @@ ytdl_format_options = {
     'source_address': '0.0.0.0',
     'cookiefile': cookie_path,
     'cachedir': False,
-    'extractor_args': {'youtube': {'player_client': ['android']}},
+    'extractor_args': {'youtube': {'player_client': ['ios']}},
     'force_ipv4': True,
 }
 

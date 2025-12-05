@@ -5,6 +5,7 @@ channels:
 dependencies:
   - python=3.10
   - ffmpeg
+  - nodejs
   - pip
   - pip:
     - discord.py[voice]
