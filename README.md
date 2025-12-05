@@ -1,119 +1,133 @@
-# 🎵 Discord Music Bot / 音乐机器人
+# 🎵 Discord Music Bot
 
-A feature-rich, open-source Discord music bot built with Python, `discord.py`, and `yt-dlp`.  
-基于 Python, `discord.py` 和 `yt-dlp` 构建的功能丰富的开源 Discord 音乐机器人。
+A feature-rich, robust, and open-source Discord music bot built with Python, `discord.py`, and `yt-dlp`.
 
-## ✨ Features / 功能特性
+> **[中文文档 (Chinese Documentation)](README_CN.md)**
 
-*   **🎶 High Quality Playback**: Streams audio from YouTube, SoundCloud, and direct URL sources.
+## 🚀 v2.0 Release: Hybrid Architecture & Smart Caching
+
+**This release permanently resolves the persistent YouTube "403 Forbidden" playback errors.**
+
+We have introduced a new **"Hybrid Playback Engine"**:
+1.  **Smart Failover**: The bot prioritizes **Streaming** for speed. If YouTube blocks the stream (403 error), the bot **automatically** switches to **"Download Mode"**, downloads the track to the server, and plays it locally. This guarantees **100% playback success**.
+2.  **Smart Caching System**: Downloaded songs are saved in `data/music_cache/`.
+    *   **No Duplicates**: If a song is requested again, the bot plays the cached local file immediately without re-downloading.
+    *   **Auto Cleanup**: A maintenance script automatically deletes cached files older than **7 days** to save disk space.
+3.  **Enhanced Environment**: Integrated Node.js support to handle signature decryption for protected videos (e.g., Vevo).
+
+---
+
+## ✨ Key Features
+
+*   **🎶 High Quality Playback**: Streams/Downloads audio from YouTube, SoundCloud, and direct URLs.
+*   **🛡️ 403 Protection**: Multi-layer defense (Header Injection, IPv4 Enforcement, Failover Downloading).
 *   **🟢 Spotify Support**: Seamlessly handles Spotify Track, Album, and Playlist links (auto-converts to YouTube queries).
-*   **🤖 Slash Commands**: Full support for `/play`, `/search`, and more with autocomplete suggestions.
-*   **🔍 Smart Search**: 
-    *   `/play`: Type to get real-time search suggestions from YouTube.
-    *   `/search`: Select from top 5 results with video duration displayed.
-*   **📂 Playlist Management**: Create, save, and load your own custom playlists.
+*   **🤖 Slash Commands**: Full support for `/play`, `/search` with rich autocomplete suggestions.
+*   **📂 Playlist Management**: Create, save, and load custom playlists. Supports importing from YouTube/Spotify playlists.
 *   **📻 Radio Mode**: Listen to live 24/7 radio streams (Lofi, Jazz, etc.).
 *   **🌐 Bilingual Support**: Help command available in both English and Chinese.
 
-## 🛠️ Setup / 安装指南
+## 🛠️ Installation & Setup
 
-### Prerequisites / 前置要求
+### 1. Prerequisites
 
-1.  **Python 3.10+**
-2.  **FFmpeg**: Essential for audio processing.
-    *   **Linux**: `sudo apt install ffmpeg`
-    *   **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to your PATH.
+*   **Python 3.10+**
+*   **FFmpeg**: Essential for audio processing.
+    *   Linux: `sudo apt install ffmpeg`
+*   **Node.js**: **(New in v2.0)** Required for yt-dlp signature decryption.
+    *   Linux: `sudo apt install nodejs`
 
-### Installation / 安装步骤
+### 2. Installation
 
-1.  **Clone the repository / 克隆仓库:**
+1.  **Clone the repository:**
     ```bash
     git clone <repository_url>
     cd discord_song_bot
     ```
 
-2.  **Install Dependencies / 安装依赖:**
+2.  **Install Dependencies:**
     
-    Using Conda (Recommended):
+    Using Conda (Recommended - includes Python, FFmpeg, Node.js):
     ```bash
     conda env create -f environment.yml
     conda activate discord_music_bot
     ```
     
-    Or using pip:
+    Or using pip (Manual FFmpeg/Node.js install required):
     ```bash
     pip install discord.py[voice] yt-dlp spotipy python-dotenv aiohttp
     ```
 
-3.  **Configuration / 配置:**
+3.  **Configuration (.env):**
     Create a `.env` file in the project root:
     ```env
     DISCORD_TOKEN=your_discord_bot_token
-    SPOTIPY_CLIENT_ID=your_spotify_client_id  # Optional / 可选
-    SPOTIPY_CLIENT_SECRET=your_spotify_client_secret # Optional / 可选
+    SPOTIPY_CLIENT_ID=your_spotify_client_id  # Optional
+    SPOTIPY_CLIENT_SECRET=your_spotify_client_secret # Optional
     ```
 
-4.  **Permissions / 权限设置:**
-    *   Go to Discord Developer Portal -> Bot.
-    *   Enable **Message Content Intent** (Required for traditional `!` commands to work).
-    *   Ensure the bot invite includes `applications.commands` scope.
+4.  **Cookies (Crucial):**
+    *   Export your YouTube `cookies.txt` using a browser extension.
+    *   Place it in the project **root directory**. This is required to bypass age restrictions and 403 errors.
 
-### Running the Bot / 运行机器人
+### 3. Running the Bot
 
 ```bash
 python main.py
 ```
 
-## 🎮 Usage / 使用方法
+## 🎮 Commands
 
-### 🔄 First Time Setup / 首次设置
-After starting the bot, run this command in your server to register Slash Commands immediately:
-```
-!sync ~
-```
+### Common Commands
 
-### 📜 Commands / 命令列表
-
-| Command / 命令 | Description / 描述 |
+| Command | Description |
 | :--- | :--- |
-| **`/play <query>`** | Play a song via URL or search term (with autocomplete). <br> 播放链接或搜索关键词（支持自动补全）。 |
-| **`/search <query>`** | Search YouTube and select from a list (shows duration). <br> 搜索 YouTube 并选择歌曲（显示时长）。 |
-| **`/stop`** | Stop playback and clear queue. <br> 停止播放并清空队列。 |
-| **`/skip`** | Skip the current song. <br> 跳过当前歌曲。 |
-| **`/queue`** | Show the current play queue. <br> 显示当前播放队列。 |
-| **`/shuffle`** | Shuffle the queue. <br> 随机打乱队列。 |
-| **`/loop`** | Toggle loop for current song. <br> 切换单曲循环。 |
-| **`/radio [genre]`** | Play a live radio (default: lofi). <br> 播放电台（默认：lofi）。 |
-| **`/help`** | Show bilingual help menu. <br> 显示双语帮助菜单。 |
-| **`/leave`** | Disconnect from voice channel. <br> 断开语音连接。 |
+| **`/play <query>`** | Play a song via URL or search term (with autocomplete). |
+| **`/search <query>`** | Search YouTube and select from the top 5 results. |
+| **`/stop`** | Stop playback and clear the queue. |
+| **`/skip`** | Skip the current song. |
+| **`/queue`** | Display the current play queue. |
+| **`/shuffle`** | Shuffle the queue. |
+| **`/loop`** | Toggle loop mode for the current song. |
+| **`/radio [genre]`** | Play a live radio stream (default: lofi). |
+| **`/playlist`** | Manage saved playlists (see below). |
 
-### 📂 Playlist Commands / 播放列表
+### Playlist Management
 
-*   `/playlist create <name>`: Create a new playlist. <br> 创建一个新歌单。
-*   `/playlist add <name> <song_query>`: Add single/multiple songs (comma/pipe separated), YouTube playlist URL, or Spotify URL to playlist. <br> 添加单曲/多首歌曲（逗号或竖线分隔）、YouTube 播放列表链接或 Spotify 链接到歌单。
-*   `/playlist show <name>`: Show all songs in a playlist with indices. <br> 显示歌单所有歌曲（带序号）。
-*   `/playlist remove <name> <index>`: Remove a song from a playlist by index. <br> 根据序号从歌单中移除歌曲。
-*   `/playlist load <name>`: Load playlist to queue. <br> 将歌单加载到播放队列。
-*   `/playlist list`: List all playlists. <br> 列出所有歌单。
-*   `/playlist delete <name>`: Delete a playlist. <br> 删除整个歌单。
+*   `/playlist create <name>`: Create a new playlist.
+*   `/playlist add <name> <content>`: Add songs to a playlist.
+    *   Supports single URLs or Search terms.
+    *   Supports multiple songs (comma `,` or pipe `|` separated).
+    *   **Supports importing full YouTube Playlists or Spotify links!**
+*   `/playlist load <name>`: Load a saved playlist into the queue.
+*   `/playlist list`: List all saved playlists.
+*   `/playlist show <name>`: Show songs in a playlist.
+*   `/playlist delete <name>`: Delete a playlist.
 
-**💡 提示 / Tips:**
-*   `/playlist` 命令的所有子命令 (`add`, `load`, `delete`, `show`, `remove`) 的**歌单名称 (name)** 参数都支持**自动补全**！
-*   `/playlist remove` 命令的**歌曲序号 (index)** 参数也支持**自动补全**，方便你选择要删除的歌曲。
+## 🏗️ Technical Workflow
 
-## ➕ Invite Bot / 邀请机器人
+How the bot decides how to play a song:
 
-使用此链接邀请机器人到你的 Discord 服务器：
+```mermaid
+graph TD
+    A[User Command /play] --> B{Is file in Cache?}
+    B -- Yes --> C[Play Local File (Instant)]
+    B -- No --> D[Attempt Streaming]
+    D -- Success --> E[Stream from YouTube]
+    D -- Failure (403/Error) --> F[Download Mode]
+    F --> G[Download to Server]
+    G --> C
+```
 
-[邀请你的音乐机器人](https://discord.com/api/oauth2/authorize?client_id=1445653328703913984&permissions=8&scope=bot%20applications.commands)
+This ensures that **if streaming fails, the bot simply tries harder (downloads it)** instead of giving up.
 
 ---
-## ⚠️ Troubleshooting / 故障排除
+
+## ⚠️ Troubleshooting
 
 *   **"PrivilegedIntentsRequired" Error**:
     *   Go to Discord Developer Portal -> Bot -> Privileged Gateway Intents -> Enable "Message Content Intent".
 *   **Slash commands not appearing?**:
-    *   Run `!sync ~` in your server.
-    *   Re-invite the bot using the URL printed in the console at startup.
-*   **Spotify links not working?**:
-    *   Ensure `SPOTIPY_CLIENT_ID` and `SPOTIPY_CLIENT_SECRET` are set in your `.env` file.
+    *   Run `!sync ~` in your server or re-invite the bot.
+*   **Node.js Warning**:
+    *   If you see "WARNING: Node.js NOT found" at startup, please install Node.js. Protected videos will fail without it.
