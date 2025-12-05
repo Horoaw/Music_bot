@@ -91,25 +91,30 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         if 'http_headers' in data:
             headers = data['http_headers']
-            # Only pass critical headers. FFmpeg can be picky.
-            ua = headers.get('User-Agent')
-            cookie = headers.get('Cookie')
             
+            # Construct header string with ALL headers
             header_items = []
-            if ua:
-                header_items.append(f"User-Agent: {ua}")
-            if cookie:
-                header_items.append(f"Cookie: {cookie}")
+            for key, value in headers.items():
+                header_items.append(f"{key}: {value}")
             
-            if header_items:
-                # FFmpeg expects key: value\r\n key: value\r\n
-                header_str = "\r\n".join(header_items) + "\r\n"
-                
-                # Inject -headers before other options.
-                if 'before_options' in _ffmpeg_options:
-                     _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-                else:
-                     _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+            # FFmpeg expects key: value\r\n
+            header_str = "\r\n".join(header_items) + "\r\n"
+            
+            # Inject -headers
+            if 'before_options' in _ffmpeg_options:
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+            else:
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+
+            # Also set user-agent explicitly if available, as FFmpeg has a specific flag for it
+            if 'User-Agent' in headers:
+                _ffmpeg_options['before_options'] += f' -user_agent "{headers["User-Agent"]}"'
+            
+            # Debug: Print headers being sent (Mask cookie for security in logs)
+            debug_headers = headers.copy()
+            if 'Cookie' in debug_headers:
+                debug_headers['Cookie'] = '***'
+            print(f"DEBUG: Passing headers to FFmpeg: {debug_headers}")
 
         return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **_ffmpeg_options), data=data)
 
