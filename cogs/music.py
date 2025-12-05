@@ -27,6 +27,13 @@ def get_ffmpeg_exe():
 ffmpeg_executable = get_ffmpeg_exe()
 print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
+cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
+print(f"Looking for cookies at: {cookie_path}")
+if os.path.exists(cookie_path):
+    print(f"Cookies found! Size: {os.path.getsize(cookie_path)} bytes")
+else:
+    print("WARNING: cookies.txt NOT FOUND at expected path!")
+
 ytdl_format_options = {
     'format': 'bestaudio/best',
     'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
@@ -39,7 +46,9 @@ ytdl_format_options = {
     'no_warnings': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
-    'cookiefile': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt'), # Robust absolute path to cookies.txt
+    'cookiefile': cookie_path,
+    'cachedir': False,
+    'extractor_args': {'youtube': {'player_client': ['android']}},
 }
 
 ffmpeg_options = {
