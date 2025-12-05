@@ -20,4 +20,15 @@ fi
 echo "   - Cleaning pycache..."
 find /home/discord/Music_bot -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null
 
+# 3. Clean up Music Cache (Keep files for 7 days)
+echo "   - Cleaning music cache (older than 7 days)..."
+# Adjust path if necessary. Assuming standard deployment path.
+CACHE_DIR="/home/discord/Music_bot/data/music_cache"
+if [ -d "$CACHE_DIR" ]; then
+    find "$CACHE_DIR" -type f -mtime +7 -delete
+    echo "     Removed cached files older than 7 days."
+else
+    echo "     Cache directory not found (skipping)."
+fi
+
 echo "✅ Cleanup Complete."

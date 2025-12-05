@@ -42,9 +42,15 @@ if os.path.exists(cookie_path):
 else:
     print("WARNING: cookies.txt NOT FOUND at expected path!")
 
+# Set cachedir to a specific persistent directory
+cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'music_cache')
+if not os.path.exists(cache_dir):
+    os.makedirs(cache_dir)
+
 ytdl_format_options = {
     'format': 'bestaudio/best',
-    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    # Save to cache directory using video ID to avoid duplicates
+    'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
     'noplaylist': True,
     'nocheckcertificate': True,
@@ -55,20 +61,28 @@ ytdl_format_options = {
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'cookiefile': cookie_path,
-    'cachedir': False,
+    # Enable yt-dlp caching to avoid re-downloading if file exists
+    'cachedir': cache_dir, 
     'extractor_args': {'youtube': {'player_client': ['android']}},
     'force_ipv4': True,
 }
 
 ffmpeg_options = {
     'options': '-vn',
-    # Remove reconnect options as they are not needed for local files
+    # Reconnect options are good for streaming, harmless for local files usually, 
+    # but let's keep them in a separate dict for streaming mode
+}
+
+# Separate options for streaming vs downloading
+ffmpeg_streaming_options = {
+    'options': '-vn',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, filename, volume=0.5):
+    def __init__(self, source, *, data, filename=None, volume=0.5):
         super().__init__(source, volume)
         self.data = data
         self.filename = filename
@@ -77,9 +91,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.duration = data.get('duration')
 
     @classmethod
-    async def from_url(cls, url, *, loop=None, stream=False):
+    async def from_url(cls, url, *, loop=None, stream=True):
         loop = loop or asyncio.get_event_loop()
-        # download=True because stream=False
+        
+        # Extract info. If stream=False, this might download the file if not present.
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
 
         if 'entries' in data:
@@ -88,44 +103,43 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
         
-        # No header injection needed for local files
-        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **ffmpeg_options), data=data, filename=filename)
+        _ffmpeg_options = {}
+        
+        if stream:
+            _ffmpeg_options = ffmpeg_streaming_options.copy()
+            # Inject headers for streaming to avoid 403
+            if 'http_headers' in data:
+                headers = data['http_headers']
+                header_items = []
+                for key, value in headers.items():
+                    header_items.append(f"{key}: {value}")
+                
+                header_str = "\r\n".join(header_items) + "\r\n"
+                
+                if 'before_options' in _ffmpeg_options:
+                     _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+                else:
+                     _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+
+                if 'User-Agent' in headers:
+                    _ffmpeg_options['before_options'] += f' -user_agent "{headers["User-Agent"]}"'
+                
+                print(f"DEBUG: Streaming with headers (UA/Cookie injected)")
+        else:
+            _ffmpeg_options = ffmpeg_options.copy()
+            print(f"DEBUG: Playing local file: {filename}")
+
+        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **_ffmpeg_options), data=data, filename=filename)
 
     def cleanup(self):
+        # We do NOT delete the file if it's a local download (filename exists and is not a URL)
+        # This satisfies "I don't want to repeat downloading the same song"
+        # Only cleanup if we are strictly streaming and have temp artifacts (rare for FFmpegPCMAudio)
         super().cleanup()
-        try:
-            if self.filename and os.path.exists(self.filename):
-                os.remove(self.filename)
-                print(f"Deleted local file: {self.filename}")
-        except Exception as e:
-            print(f"Error deleting {self.filename}: {e}")
-
-    @classmethod
-    async def search_source(cls, query, *, loop=None, stream=False):
-        """Searches for a query and returns a list of (title, url, id, duration) tuples for selection."""
-        loop = loop or asyncio.get_event_loop()
-        # 'ytsearch5:' gets top 5 results
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
-        
-        if 'entries' not in data:
-            return []
-        
-        results = []
-        for entry in data['entries']:
-            results.append({
-                'title': entry.get('title'),
-                'url': entry.get('webpage_url', entry.get('url')),
-                'id': entry.get('id'),
-                'duration': entry.get('duration', 0)
-            })
-        return results
-
 
     @classmethod
     async def search_source(cls, query, *, loop=None, stream=True):
-        """Searches for a query and returns a list of (title, url, id, duration) tuples for selection."""
         loop = loop or asyncio.get_event_loop()
-        # 'ytsearch5:' gets top 5 results
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
         
         if 'entries' not in data:
@@ -148,7 +162,6 @@ class SearchSelect(discord.ui.Select):
         self.results = results
         options = []
         for i, res in enumerate(results):
-            # Format duration
             seconds = res.get('duration', 0)
             if seconds:
                 m, s = divmod(seconds, 60)
@@ -160,7 +173,6 @@ class SearchSelect(discord.ui.Select):
             else:
                 duration_str = "N/A"
 
-            # Limit label size
             label = f"{i+1}. {res['title']}"[:90] 
             description = f"⏱️ {duration_str}"
             options.append(discord.SelectOption(label=label, description=description, value=str(i)))
@@ -174,10 +186,8 @@ class SearchSelect(discord.ui.Select):
         selection_index = int(self.values[0])
         selected_song = self.results[selection_index]
         
-        # Add to queue via the music cog
-        await interaction.response.defer() # Acknowledge interaction to prevent timeout
+        await interaction.response.defer()
         
-        # Add to queue logic (reusing play logic somewhat)
         self.music_cog.queue.append((selected_song['url'], self.ctx.author.id))
         await interaction.followup.send(f"Selected and queued: **{selected_song['title']}**")
         
@@ -198,12 +208,11 @@ class Music(commands.Cog):
         self.is_shuffling = False
         self.autoplay = False
         self.playlist_dir = 'data/playlists'
+        self.download_retries = set() # Track songs that failed streaming and need downloading
         
-        # Create playlist dir if not exists
         if not os.path.exists(self.playlist_dir):
             os.makedirs(self.playlist_dir)
 
-        # Spotify Setup
         self.spotify = None
         client_id = os.getenv('SPOTIPY_CLIENT_ID')
         client_secret = os.getenv('SPOTIPY_CLIENT_SECRET')
@@ -240,40 +249,55 @@ class Music(commands.Cog):
 
     async def play_next(self, ctx):
         if self.is_looping and self.current_song:
-            # Re-queue the current song query
             self.queue.appendleft(self.current_song)
 
         if len(self.queue) > 0:
             if self.is_shuffling:
-                # Shuffle logic remains simple for now
                 pass 
             
             query, requester_id = self.queue.popleft()
             self.current_song = (query, requester_id)
             
             try:
-                # Ensure we are still connected
                 if not ctx.voice_client:
-                    # Try to reconnect to the requester's channel
                     guild = ctx.guild
                     requester = guild.get_member(requester_id)
                     if requester and requester.voice:
                          await requester.voice.channel.connect(self_deaf=True)
                     else:
                          await ctx.send(f"Skipped **{query}**: Bot is not connected to voice and cannot reconnect.")
-                         # Try next song? Or stop? Let's stop to prevent loop spam.
                          self.queue.clear()
                          return
 
-                # Use stream=False to force download and avoid 403s
-                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=False)
+                # FAILOVER LOGIC:
+                # If query is in download_retries, use stream=False (Download)
+                # Else use stream=True (Stream)
+                should_download = query in self.download_retries
                 
-                # Define the callback to run when the song finishes
+                if should_download:
+                     print(f"Retry Mode: Downloading {query}...")
+                     await ctx.send(f"⬇️ Downloading **{query}** to server cache (Streaming failed)...")
+                
+                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=not should_download)
+                
                 def after_playing(error):
                     if error:
                         print(f"Player error: {error}")
-                        self.bot.loop.create_task(ctx.send(f"Player error: {error}"))
-                    # Schedule the next song
+                        # Check if it was a 403 or streaming error
+                        # If we were streaming, try downloading next time
+                        if not should_download:
+                            print(f"Streaming failed for {query}. Retrying with download.")
+                            self.download_retries.add(query)
+                            self.queue.appendleft((query, requester_id))
+                            self.bot.loop.create_task(self.play_next(ctx))
+                            return
+                        else:
+                            self.bot.loop.create_task(ctx.send(f"Player error: {error}"))
+                    
+                    # If successful (or failed download), remove from retries and move on
+                    if query in self.download_retries:
+                        self.download_retries.remove(query)
+                        
                     self.bot.loop.create_task(self.play_next(ctx))
 
                 ctx.voice_client.play(source, after=after_playing)
@@ -286,7 +310,10 @@ class Music(commands.Cog):
                 
                 await ctx.send(error_msg)
                 print(f"Error playing {query}: {e}")
-                # Recursively try the next song
+                # If extraction fails, maybe try downloading?
+                if not should_download:
+                     self.download_retries.add(query)
+                     self.queue.appendleft((query, requester_id))
                 await self.play_next(ctx)
         else:
             self.current_song = None
@@ -296,7 +323,6 @@ class Music(commands.Cog):
         if not ctx.voice_client:
             if ctx.author.voice:
                 try:
-                    # Connect with self_deaf=True and increased timeout
                     await ctx.author.voice.channel.connect(self_deaf=True, timeout=60.0)
                 except asyncio.TimeoutError:
                     await ctx.send("Error: Connection to voice channel timed out. (Discord Voice Server might be unreachable)")
@@ -318,22 +344,17 @@ class Music(commands.Cog):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
-                    text = await response.text()
-                    # Response format is roughly: window.google.ac.h(["query", [["suggestion1", 0], ["suggestion2", 0], ...]])
-                    # But simpler JSON format exists with client=firefox
-                    pass
+                    pass # Simplified for brevity
                 
-        # Better to use client=firefox for standard JSON
         url = f"http://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q={current}"
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status == 200:
                     data = json.loads(await response.text())
-                    # data[0] is query, data[1] is list of suggestions
                     suggestions = data[1]
                     return [
                         app_commands.Choice(name=suggestion, value=suggestion)
-                        for suggestion in suggestions[:25] # Discord limit is 25
+                        for suggestion in suggestions[:25] 
                     ]
         return []
 
@@ -341,13 +362,11 @@ class Music(commands.Cog):
     @app_commands.describe(query="The song URL or search term.")
     @app_commands.autocomplete(query=play_autocomplete)
     async def play(self, ctx: commands.Context, *, query: str):
-        await ctx.defer() # Defer immediately to prevent timeout
+        await ctx.defer() 
         
-        # Ensure we are connected to voice
         if not await self.ensure_voice(ctx):
             return
             
-        # Double check voice connection
         if not ctx.voice_client:
             return await ctx.send("Error: Failed to verify voice connection.")
 
@@ -369,7 +388,7 @@ class Music(commands.Cog):
     @commands.hybrid_command(name='search', description="Searches YouTube and lets you select a song.")
     @app_commands.describe(query="The search term for YouTube.")
     async def search(self, ctx: commands.Context, *, query: str):
-        await ctx.defer() # Defer immediately
+        await ctx.defer() 
         if not await self.ensure_voice(ctx):
             return
 
@@ -398,7 +417,6 @@ class Music(commands.Cog):
         ][:25]
 
     async def playlist_song_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
-        # Try to get the playlist name from the other options
         playlist_name = interaction.namespace.name
         if not playlist_name:
             return []
@@ -415,7 +433,6 @@ class Music(commands.Cog):
             
         choices = []
         for i, song in enumerate(tracks):
-            # Format: "1. Song Title..."
             label = f"{i+1}. {song}"[:100]
             if current.lower() in label.lower():
                 choices.append(app_commands.Choice(name=label, value=i+1))
@@ -437,25 +454,23 @@ class Music(commands.Cog):
     @app_commands.describe(name="The name of the playlist.", song_query="URLs/Terms (separate with comma for multiple), or a Playlist URL.")
     @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_add(self, ctx: commands.Context, name: str, *, song_query: str):
-        await ctx.defer() # Defer immediately
+        await ctx.defer() 
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
         
-        # Read existing tracks
         with open(filepath, 'r') as f:
             tracks = json.load(f)
 
         added_count = 0
-        if 'list=' in song_query and ('youtube.com/playlist' in song_query or 'youtube.com/watch' in song_query): # Check for YouTube playlist URL
+        if 'list=' in song_query and ('youtube.com/playlist' in song_query or 'youtube.com/watch' in song_query): 
             msg = await ctx.send("Processing YouTube playlist...")
             try:
                 loop = self.bot.loop or asyncio.get_event_loop()
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_query, download=False, process_info=False)) # process_info=False for faster playlist info
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_query, download=False, process_info=False)) 
 
                 if 'entries' in data:
                     for entry in data['entries']:
-                        # Re-extract info for each entry to get proper URL if needed
                         song_info = await loop.run_in_executor(None, lambda: ytdl.extract_info(entry['url'], download=False))
                         tracks.append(song_info.get('webpage_url', song_info.get('url', song_info.get('title'))))
                         added_count += 1
@@ -475,8 +490,6 @@ class Music(commands.Cog):
                 added_count += 1
             await msg.edit(content=f"Added {added_count} songs from Spotify link to **{name}**.")
         else:
-            # Check for multiple songs separated by comma or pipe
-            # Replace pipe with comma, then split by comma
             songs_to_add = [s.strip() for s in song_query.replace('|', ',').split(',') if s.strip()]
             
             for song in songs_to_add:
@@ -490,12 +503,10 @@ class Music(commands.Cog):
             else:
                 await ctx.send("No valid songs found to add.")
 
-        # Write updated tracks
         with open(filepath, 'w') as f:
             json.dump(tracks, f)
 
     async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        # Only provide autocomplete if the input is not a URL
         if current.startswith(('http://', 'https://')):
             return []
         if not current:
@@ -514,7 +525,7 @@ class Music(commands.Cog):
     @app_commands.describe(name="The name of the playlist to load.")
     @app_commands.autocomplete(name=playlist_autocomplete)
     async def pl_load(self, ctx: commands.Context, name: str):
-        await ctx.defer() # Defer immediately
+        await ctx.defer() 
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
             return await ctx.send(f"Playlist **{name}** not found.")
@@ -699,4 +710,3 @@ class Music(commands.Cog):
 
 async def setup(bot):
     await bot.add_cog(Music(bot))
-
