@@ -9,6 +9,7 @@ __pycache__/
 env/
 venv/
 *.log
+cookies.txt
 
 # IDE
 .vscode/
@@ -18,6 +19,7 @@ venv/
 *.mp3
 *.webm
 downloads/
+data/music_cache/
 
 # AI/ML related files and directories
 *.pt
