@@ -62,22 +62,24 @@ ytdl_format_options = {
 
 ffmpeg_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+    # Remove reconnect options as they are not needed for local files
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
 class YTDLSource(discord.PCMVolumeTransformer):
-    def __init__(self, source, *, data, volume=0.5):
+    def __init__(self, source, *, data, filename, volume=0.5):
         super().__init__(source, volume)
         self.data = data
+        self.filename = filename
         self.title = data.get('title')
         self.url = data.get('url')
         self.duration = data.get('duration')
 
     @classmethod
-    async def from_url(cls, url, *, loop=None, stream=True):
+    async def from_url(cls, url, *, loop=None, stream=False):
         loop = loop or asyncio.get_event_loop()
+        # download=True because stream=False
         data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
 
         if 'entries' in data:
@@ -86,37 +88,38 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
         
-        # Create a copy of options to inject headers dynamically
-        _ffmpeg_options = ffmpeg_options.copy()
+        # No header injection needed for local files
+        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **ffmpeg_options), data=data, filename=filename)
+
+    def cleanup(self):
+        super().cleanup()
+        try:
+            if self.filename and os.path.exists(self.filename):
+                os.remove(self.filename)
+                print(f"Deleted local file: {self.filename}")
+        except Exception as e:
+            print(f"Error deleting {self.filename}: {e}")
+
+    @classmethod
+    async def search_source(cls, query, *, loop=None, stream=False):
+        """Searches for a query and returns a list of (title, url, id, duration) tuples for selection."""
+        loop = loop or asyncio.get_event_loop()
+        # 'ytsearch5:' gets top 5 results
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
         
-        if 'http_headers' in data:
-            headers = data['http_headers']
-            
-            # Construct header string with ALL headers
-            header_items = []
-            for key, value in headers.items():
-                header_items.append(f"{key}: {value}")
-            
-            # FFmpeg expects key: value\r\n
-            header_str = "\r\n".join(header_items) + "\r\n"
-            
-            # Inject -headers
-            if 'before_options' in _ffmpeg_options:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-            else:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+        if 'entries' not in data:
+            return []
+        
+        results = []
+        for entry in data['entries']:
+            results.append({
+                'title': entry.get('title'),
+                'url': entry.get('webpage_url', entry.get('url')),
+                'id': entry.get('id'),
+                'duration': entry.get('duration', 0)
+            })
+        return results
 
-            # Also set user-agent explicitly if available, as FFmpeg has a specific flag for it
-            if 'User-Agent' in headers:
-                _ffmpeg_options['before_options'] += f' -user_agent "{headers["User-Agent"]}"'
-            
-            # Debug: Print headers being sent (Mask cookie for security in logs)
-            debug_headers = headers.copy()
-            if 'Cookie' in debug_headers:
-                debug_headers['Cookie'] = '***'
-            print(f"DEBUG: Passing headers to FFmpeg: {debug_headers}")
-
-        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **_ffmpeg_options), data=data)
 
     @classmethod
     async def search_source(cls, query, *, loop=None, stream=True):
@@ -262,7 +265,8 @@ class Music(commands.Cog):
                          self.queue.clear()
                          return
 
-                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=True)
+                # Use stream=False to force download and avoid 403s
+                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=False)
                 
                 # Define the callback to run when the song finishes
                 def after_playing(error):
