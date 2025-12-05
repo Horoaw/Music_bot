@@ -110,13 +110,12 @@ How the bot decides how to play a song:
 
 ```mermaid
 graph TD
-    A[User Command /play] --> B{Is file in Cache?}
-    B -- Yes --> C[Play Local File (Instant)]
-    B -- No --> D[Attempt Streaming]
-    D -- Success --> E[Stream from YouTube]
-    D -- Failure (403/Error) --> F[Download Mode]
-    F --> G[Download to Server]
-    G --> C
+    A[User Command: Play] --> B{Is song in cache?}
+    B -- Yes --> C[Play Local File]
+    B -- No --> D[Attempt Stream]
+    D -- Success --> E[Play Stream]
+    D -- Failure (403/Error) --> F[Download Song]
+    F --> C
 ```
 
 This ensures that **if streaming fails, the bot simply tries harder (downloads it)** instead of giving up.
