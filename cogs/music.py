@@ -76,7 +76,7 @@ ffmpeg_options = {
 # Separate options for streaming vs downloading
 ffmpeg_streaming_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10'
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
@@ -89,6 +89,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.title = data.get('title')
         self.url = data.get('url')
         self.duration = data.get('duration')
+        self.is_live = data.get('is_live', False)
 
     @classmethod
     async def from_url(cls, url, *, loop=None, stream=True):
@@ -225,6 +226,14 @@ class Music(commands.Cog):
         else:
             print("Spotify credentials not found. Spotify support disabled.")
 
+    async def safe_send(self, ctx, content):
+        """Safely send a message, ignoring errors if the channel is unknown/gone."""
+        try:
+            return await ctx.send(content)
+        except (discord.NotFound, discord.HTTPException) as e:
+            print(f"Warning: Could not send message to channel {ctx.channel.id}: {e}")
+            return None
+
     async def get_spotify_tracks(self, url):
         if not self.spotify:
             return []
@@ -265,7 +274,7 @@ class Music(commands.Cog):
                     if requester and requester.voice:
                          await requester.voice.channel.connect(self_deaf=True)
                     else:
-                         await ctx.send(f"Skipped **{query}**: Bot is not connected to voice and cannot reconnect.")
+                         await self.safe_send(ctx, f"Skipped **{query}**: Bot is not connected to voice and cannot reconnect.")
                          self.queue.clear()
                          return
 
@@ -276,7 +285,7 @@ class Music(commands.Cog):
                 
                 if should_download:
                      print(f"Retry Mode: Downloading {query}...")
-                     await ctx.send(f"⬇️ Downloading **{query}** to server cache (Streaming failed)...")
+                     await self.safe_send(ctx, f"⬇️ Downloading **{query}** to server cache (Streaming failed)...")
                 
                 source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=not should_download)
                 
@@ -286,13 +295,19 @@ class Music(commands.Cog):
                         # Check if it was a 403 or streaming error
                         # If we were streaming, try downloading next time
                         if not should_download:
-                            print(f"Streaming failed for {query}. Retrying with download.")
-                            self.download_retries.add(query)
-                            self.queue.appendleft((query, requester_id))
+                            if source.is_live:
+                                print(f"Live stream {query} failed. Retrying stream (re-extract URL)...")
+                                # Live streams should NOT be downloaded. Just retry streaming.
+                                self.queue.appendleft((query, requester_id))
+                            else:
+                                print(f"Streaming failed for {query}. Retrying with download.")
+                                self.download_retries.add(query)
+                                self.queue.appendleft((query, requester_id))
+                            
                             self.bot.loop.create_task(self.play_next(ctx))
                             return
                         else:
-                            self.bot.loop.create_task(ctx.send(f"Player error: {error}"))
+                            self.bot.loop.create_task(self.safe_send(ctx, f"Player error: {error}"))
                     
                     # If successful (or failed download), remove from retries and move on
                     if query in self.download_retries:
@@ -301,23 +316,25 @@ class Music(commands.Cog):
                     self.bot.loop.create_task(self.play_next(ctx))
 
                 ctx.voice_client.play(source, after=after_playing)
-                await ctx.send(f'Now playing: **{source.title}**')
+                await self.safe_send(ctx, f'Now playing: **{source.title}**')
             
             except Exception as e:
                 error_msg = f"Error playing **{query}**: {e}"
                 if "Sign in to confirm your age" in str(e):
                     error_msg += "\n⚠️ **Age Restricted Content**: Please upload a `cookies.txt` file to the server root to play this."
                 
-                await ctx.send(error_msg)
+                await self.safe_send(ctx, error_msg)
                 print(f"Error playing {query}: {e}")
                 # If extraction fails, maybe try downloading?
                 if not should_download:
+                     # Caution: We can't know if it's live if extraction failed. 
+                     # Safe bet: Try download unless we already know it's a retry.
                      self.download_retries.add(query)
                      self.queue.appendleft((query, requester_id))
                 await self.play_next(ctx)
         else:
             self.current_song = None
-            await ctx.send("Queue finished.")
+            await self.safe_send(ctx, "Queue finished.")
 
     async def ensure_voice(self, ctx):
         if not ctx.voice_client:
