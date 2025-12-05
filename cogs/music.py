@@ -76,7 +76,28 @@ class YTDLSource(discord.PCMVolumeTransformer):
             data = data['entries'][0]
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
-        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **ffmpeg_options), data=data)
+        
+        # Create a copy of options to inject headers dynamically
+        _ffmpeg_options = ffmpeg_options.copy()
+        
+        if 'http_headers' in data:
+            headers = data['http_headers']
+            # Construct header string: "Name: Value\r\nName: Value"
+            header_items = []
+            for key, value in headers.items():
+                header_items.append(f"{key}: {value}")
+            header_str = "\r\n".join(header_items)
+            
+            # Inject -headers before other options. 
+            # FFmpeg requires -headers to be specified BEFORE the input file (-i), which discord.py handles.
+            # We ensure the string is quoted properly for the command line construction if needed, 
+            # though discord.py passes this string to shlex.split usually.
+            if 'before_options' in _ffmpeg_options:
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+            else:
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+
+        return cls(discord.FFmpegPCMAudio(filename, executable=ffmpeg_executable, **_ffmpeg_options), data=data)
 
     @classmethod
     async def search_source(cls, query, *, loop=None, stream=True):
