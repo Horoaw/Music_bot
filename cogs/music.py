@@ -56,7 +56,7 @@ ytdl_format_options = {
     'source_address': '0.0.0.0',
     'cookiefile': cookie_path,
     'cachedir': False,
-    'extractor_args': {'youtube': {'player_client': ['ios']}},
+    'extractor_args': {'youtube': {'player_client': ['android']}},
     'force_ipv4': True,
 }
 
