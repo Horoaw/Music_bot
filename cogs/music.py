@@ -320,8 +320,9 @@ class Music(commands.Cog):
             
             except Exception as e:
                 error_msg = f"Error playing **{query}**: {e}"
-                if "Sign in to confirm your age" in str(e):
-                    error_msg += "\n⚠️ **Age Restricted Content**: Please upload a `cookies.txt` file to the server root to play this."
+                str_e = str(e)
+                if "Sign in to confirm your age" in str_e or "Sign in to confirm you’re not a bot" in str_e:
+                    error_msg += "\n⚠️ **Authentication Required**: Please upload a valid `cookies.txt` file to the server root directory to play this video."
                 
                 await self.safe_send(ctx, error_msg)
                 print(f"Error playing {query}: {e}")
