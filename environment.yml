@@ -9,7 +9,7 @@ dependencies:
   - pip
   - pip:
     - discord.py[voice]
-    - yt-dlp
+    - yt-dlp==2025.11.12
     - python-dotenv
     - spotipy
     - requests
