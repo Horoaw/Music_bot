@@ -28,8 +28,50 @@ def get_ffmpeg_exe():
 ffmpeg_executable = get_ffmpeg_exe()
 print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
-# Ensure Node.js is in PATH for yt-dlp - DEPRECATED, now explicitly pointing yt-dlp to node
-# Removed ensure_node_path() function
+# Ensure Node.js is in PATH for yt-dlp
+def ensure_node_path():
+    # Force add standard system paths to PATH
+    extra_paths = ['/usr/bin', '/usr/local/bin']
+    current_path = os.environ.get("PATH", "")
+    
+    # Ensure system paths are at the VERY front
+    new_path = os.pathsep.join(extra_paths + [current_path])
+    os.environ["PATH"] = new_path
+    
+    print(f"DEBUG: Updated PATH for yt-dlp: {os.environ['PATH']}")
+    
+    import shutil
+    node_path = shutil.which("node")
+    print(f"DEBUG: shutil.which('node') returns: {node_path}")
+
+    # Verify if the found node actually works
+    if node_path:
+        try:
+            node_version = subprocess.check_output([node_path, "--version"], stderr=subprocess.STDOUT, text=True).strip()
+            print(f"DEBUG: Node.js at {node_path} is version: {node_version}")
+            
+            # AGGRESSIVE FIX:
+            # If we detect Conda's node, FORCE switch to System Node.
+            if "anaconda" in node_path or "envs" in node_path:
+                print("DEBUG: Detected Conda/Env Node.js. Forcing switch to System Node to fix yt-dlp issues.")
+                
+                # Remove that Conda directory from PATH
+                broken_dir = os.path.dirname(node_path)
+                env_paths = os.environ["PATH"].split(os.pathsep)
+                clean_paths = [p for p in env_paths if os.path.abspath(p) != os.path.abspath(broken_dir)]
+                # Re-add system paths just in case
+                clean_paths = extra_paths + clean_paths
+                os.environ["PATH"] = os.pathsep.join(clean_paths)
+                print(f"DEBUG: Cleaned PATH: {os.environ['PATH']}")
+                
+                # Re-check
+                new_node = shutil.which("node")
+                print(f"DEBUG: New shutil.which('node'): {new_node}")
+
+        except Exception as e:
+            print(f"WARNING: Node.js check failed: {e}")
+
+ensure_node_path()
 
 cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
 print(f"Looking for cookies at: {cookie_path}")
@@ -61,8 +103,6 @@ ytdl_format_options = {
     'cookiefile': cookie_path,
     # Enable yt-dlp caching to avoid re-downloading if file exists
     'cachedir': cache_dir,
-    # Explicitly tell yt-dlp where to find node.js runtime
-    'js_runtimes': {'node': '/usr/bin/node'},
 }
 
 ffmpeg_options = {
