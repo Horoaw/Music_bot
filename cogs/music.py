@@ -28,12 +28,26 @@ def get_ffmpeg_exe():
 ffmpeg_executable = get_ffmpeg_exe()
 print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
-# Check for Node.js (Crucial for yt-dlp signature decryption)
-try:
-    node_version = subprocess.check_output(["node", "--version"], text=True).strip()
-    print(f"Node.js found: {node_version}")
-except (FileNotFoundError, subprocess.CalledProcessError):
-    print("WARNING: Node.js NOT found in PATH. Protected videos (e.g., Vevo) will likely FAIL with 403 errors.")
+# Ensure Node.js is in PATH for yt-dlp
+def ensure_node_path():
+    # Check if 'node' is already available
+    try:
+        subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
+        print("Node.js is already in PATH.")
+        return
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        pass
+    
+    # Check in the same directory as python executable (Conda/Venv bin)
+    python_dir = os.path.dirname(sys.executable)
+    possible_node = os.path.join(python_dir, 'node')
+    if os.path.exists(possible_node) and os.access(possible_node, os.X_OK):
+        print(f"Found Node.js at {possible_node}. Adding to PATH.")
+        os.environ["PATH"] += os.pathsep + python_dir
+    else:
+        print("WARNING: Node.js executable not found in Python environment. yt-dlp may fail on signature-protected videos.")
+
+ensure_node_path()
 
 cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
 print(f"Looking for cookies at: {cookie_path}")
