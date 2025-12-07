@@ -36,22 +36,37 @@ def ensure_node_path():
     extra_paths = ['/usr/bin', '/usr/local/bin']
     current_path = os.environ.get("PATH", "")
     
+    # Ensure system paths are at the VERY front
     new_path = os.pathsep.join(extra_paths + [current_path])
     os.environ["PATH"] = new_path
     
     print(f"DEBUG: Updated PATH for yt-dlp: {os.environ['PATH']}")
     
-    # Verify if node is now visible
-    try:
-        node_version = subprocess.check_output(["node", "--version"], stderr=subprocess.STDOUT, text=True).strip()
-        print(f"DEBUG: Node.js successfully detected: {node_version}")
-    except Exception as e:
-        print(f"WARNING: Node.js still not found after PATH update: {e}")
-
-    # Explicit check with shutil to see what Python sees
     import shutil
     node_path = shutil.which("node")
     print(f"DEBUG: shutil.which('node') returns: {node_path}")
+
+    # Verify if the found node actually works
+    if node_path:
+        try:
+            node_version = subprocess.check_output([node_path, "--version"], stderr=subprocess.STDOUT, text=True).strip()
+            print(f"DEBUG: Node.js at {node_path} is version: {node_version}")
+        except Exception as e:
+            print(f"WARNING: Node.js at {node_path} is BROKEN: {e}")
+            print("Attempting to bypass broken node by removing its path...")
+            # If the found node is broken (e.g. Conda one), remove it from PATH so system node can take over
+            broken_dir = os.path.dirname(node_path)
+            env_paths = os.environ["PATH"].split(os.pathsep)
+            # Filter out the broken directory
+            clean_paths = [p for p in env_paths if os.path.abspath(p) != os.path.abspath(broken_dir)]
+            # Re-add system paths just in case
+            clean_paths = extra_paths + clean_paths
+            os.environ["PATH"] = os.pathsep.join(clean_paths)
+            print(f"DEBUG: Cleaned PATH: {os.environ['PATH']}")
+            
+            # Re-check
+            new_node = shutil.which("node")
+            print(f"DEBUG: New shutil.which('node'): {new_node}")
 
 ensure_node_path()
 
