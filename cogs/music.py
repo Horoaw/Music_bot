@@ -48,6 +48,11 @@ def ensure_node_path():
     except Exception as e:
         print(f"WARNING: Node.js still not found after PATH update: {e}")
 
+    # Explicit check with shutil to see what Python sees
+    import shutil
+    node_path = shutil.which("node")
+    print(f"DEBUG: shutil.which('node') returns: {node_path}")
+
 ensure_node_path()
 
 cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
