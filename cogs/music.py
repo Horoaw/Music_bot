@@ -30,33 +30,23 @@ print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
 # Ensure Node.js is in PATH for yt-dlp
 def ensure_node_path():
-    # 1. Try to find 'node' in common system locations first
-    common_paths = [
-        '/usr/bin/node',
-        '/usr/local/bin/node',
-        '/bin/node',
-        os.path.join(os.path.dirname(sys.executable), 'node') # Conda/Venv
-    ]
+    # Force add standard system paths to PATH
+    # Systemd services often have very restricted PATHs (e.g., just /bin:/usr/bin is sometimes not enough or ordered wrong)
+    # We prioritize /usr/bin and /usr/local/bin where node usually lives.
+    extra_paths = ['/usr/bin', '/usr/local/bin']
+    current_path = os.environ.get("PATH", "")
     
-    found_node = None
-    for path in common_paths:
-        if os.path.exists(path) and os.access(path, os.X_OK):
-            found_node = path
-            break
-            
-    if found_node:
-        print(f"Found Node.js at {found_node}. Adding directory to PATH.")
-        # Prepend to PATH to ensure it's found first
-        node_dir = os.path.dirname(found_node)
-        os.environ["PATH"] = node_dir + os.pathsep + os.environ.get("PATH", "")
-    else:
-        # 2. Fallback: Check if 'node' is already available in current PATH
-        try:
-            subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
-            print("Node.js is already in PATH.")
-            return
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            print("WARNING: Node.js executable not found in system paths or Python environment. yt-dlp may fail on signature-protected videos.")
+    new_path = os.pathsep.join(extra_paths + [current_path])
+    os.environ["PATH"] = new_path
+    
+    print(f"DEBUG: Updated PATH for yt-dlp: {os.environ['PATH']}")
+    
+    # Verify if node is now visible
+    try:
+        node_version = subprocess.check_output(["node", "--version"], stderr=subprocess.STDOUT, text=True).strip()
+        print(f"DEBUG: Node.js successfully detected: {node_version}")
+    except Exception as e:
+        print(f"WARNING: Node.js still not found after PATH update: {e}")
 
 ensure_node_path()
 
