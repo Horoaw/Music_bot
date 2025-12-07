@@ -77,14 +77,18 @@ ffmpeg_options = {
 ffmpeg_streaming_options = {
     'options': '-vn',
     # Aggressive reconnect options to handle 403s and resets
-    # -reconnect 1: Enable auto-reconnection
-    # -reconnect_streamed 1: Allow reconnecting even for live streams
-    # -reconnect_delay_max 5: Wait up to 5s between retries
-    # -reconnect_on_network_error 1: Reconnect on TCP resets/broken pipes
-    # -reconnect_at_eof 1: Try to reconnect if stream ends prematurely
-    # -user_agent: Spoof UA to look like a browser
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1 -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1'
 }
+
+# Pool of User-Agents to rotate
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.114 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1"
+]
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
 
@@ -115,9 +119,16 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         if stream:
             _ffmpeg_options = ffmpeg_streaming_options.copy()
+            
+            # Select a random User-Agent for this session
+            current_ua = random.choice(USER_AGENTS)
+            
             # Inject headers for streaming to avoid 403
             if 'http_headers' in data:
                 headers = data['http_headers']
+                # Override or add User-Agent
+                headers['User-Agent'] = current_ua
+                
                 header_items = []
                 for key, value in headers.items():
                     header_items.append(f"{key}: {value}")
@@ -129,10 +140,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 else:
                      _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
 
-                if 'User-Agent' in headers:
-                    _ffmpeg_options['before_options'] += f' -user_agent "{headers["User-Agent"]}"'
+                # Also add -user_agent flag explicitly for protocols that use it directly
+                _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
                 
-                print(f"DEBUG: Streaming with headers (UA/Cookie injected)")
+                print(f"DEBUG: Streaming with UA: {current_ua}")
+            else:
+                # If no headers from yt-dlp, just inject our UA
+                _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
         else:
             _ffmpeg_options = ffmpeg_options.copy()
             print(f"DEBUG: Playing local file: {filename}")
