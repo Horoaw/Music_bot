@@ -30,22 +30,33 @@ print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
 # Ensure Node.js is in PATH for yt-dlp
 def ensure_node_path():
-    # Check if 'node' is already available
-    try:
-        subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
-        print("Node.js is already in PATH.")
-        return
-    except (FileNotFoundError, subprocess.CalledProcessError):
-        pass
+    # 1. Try to find 'node' in common system locations first
+    common_paths = [
+        '/usr/bin/node',
+        '/usr/local/bin/node',
+        '/bin/node',
+        os.path.join(os.path.dirname(sys.executable), 'node') # Conda/Venv
+    ]
     
-    # Check in the same directory as python executable (Conda/Venv bin)
-    python_dir = os.path.dirname(sys.executable)
-    possible_node = os.path.join(python_dir, 'node')
-    if os.path.exists(possible_node) and os.access(possible_node, os.X_OK):
-        print(f"Found Node.js at {possible_node}. Adding to PATH.")
-        os.environ["PATH"] += os.pathsep + python_dir
+    found_node = None
+    for path in common_paths:
+        if os.path.exists(path) and os.access(path, os.X_OK):
+            found_node = path
+            break
+            
+    if found_node:
+        print(f"Found Node.js at {found_node}. Adding directory to PATH.")
+        # Prepend to PATH to ensure it's found first
+        node_dir = os.path.dirname(found_node)
+        os.environ["PATH"] = node_dir + os.pathsep + os.environ.get("PATH", "")
     else:
-        print("WARNING: Node.js executable not found in Python environment. yt-dlp may fail on signature-protected videos.")
+        # 2. Fallback: Check if 'node' is already available in current PATH
+        try:
+            subprocess.check_output(["node", "--version"], stderr=subprocess.DEVNULL)
+            print("Node.js is already in PATH.")
+            return
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            print("WARNING: Node.js executable not found in system paths or Python environment. yt-dlp may fail on signature-protected videos.")
 
 ensure_node_path()
 
