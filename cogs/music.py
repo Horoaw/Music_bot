@@ -307,7 +307,14 @@ class Music(commands.Cog):
                             self.bot.loop.create_task(self.play_next(ctx))
                             return
                         else:
-                            self.bot.loop.create_task(self.safe_send(ctx, f"Player error: {error}"))
+                             # If download failed or playing downloaded file failed
+                             if source.is_live:
+                                  print(f"Live stream retry failed for {query}. Retrying...")
+                                  self.queue.appendleft((query, requester_id))
+                                  self.bot.loop.create_task(self.play_next(ctx))
+                                  return
+
+                             self.bot.loop.create_task(self.safe_send(ctx, f"Player error: {error}"))
                     
                     # If successful (or failed download), remove from retries and move on
                     if query in self.download_retries:
