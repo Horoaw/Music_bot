@@ -395,6 +395,20 @@ class Music(commands.Cog):
         if not ctx.voice_client:
             return await ctx.send("Error: Failed to verify voice connection.")
 
+        # Sanitize YouTube URL: If it has v= and list=, strip the list part to avoid yt-dlp Mix errors
+        if 'youtube.com/watch' in query and 'list=' in query:
+            try:
+                # Basic parsing to keep only v=...
+                import urllib.parse as urlparse
+                parsed = urlparse.urlparse(query)
+                params = urlparse.parse_qs(parsed.query)
+                if 'v' in params:
+                    video_id = params['v'][0]
+                    query = f"https://www.youtube.com/watch?v={video_id}"
+                    print(f"Sanitized Mix URL to: {query}")
+            except Exception as e:
+                print(f"Error sanitizing URL: {e}")
+
         if 'spotify.com' in query:
             msg = await ctx.send("Processing Spotify link...")
             tracks = await self.get_spotify_tracks(query)
