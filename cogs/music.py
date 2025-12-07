@@ -48,7 +48,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio[ext=webm]+bestaudio[ext=m4a]/bestaudio/best',
     # Save to cache directory using video ID to avoid duplicates
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
