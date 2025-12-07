@@ -55,15 +55,16 @@ ytdl_format_options = {
     'noplaylist': True,
     'nocheckcertificate': True,
     'ignoreerrors': False,
-    'logtostderr': False,
-    'quiet': True,
-    'no_warnings': True,
+    # DEBUGGING ENABLED: Verbose logging to find why formats are missing
+    'logtostderr': True,
+    'quiet': False,
+    'no_warnings': False,
+    'verbose': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'cookiefile': cookie_path,
     # Enable yt-dlp caching to avoid re-downloading if file exists
     'cachedir': cache_dir, 
-    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
 }
 
 ffmpeg_options = {
