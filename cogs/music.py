@@ -28,55 +28,8 @@ def get_ffmpeg_exe():
 ffmpeg_executable = get_ffmpeg_exe()
 print(f"Using FFmpeg executable: {ffmpeg_executable}")
 
-# Ensure Node.js is in PATH for yt-dlp
-def ensure_node_path():
-    # Force add standard system paths to PATH
-    # Systemd services often have very restricted PATHs (e.g., just /bin:/usr/bin is sometimes not enough or ordered wrong)
-    # We prioritize /usr/bin and /usr/local/bin where node usually lives.
-    extra_paths = ['/usr/bin', '/usr/local/bin']
-    current_path = os.environ.get("PATH", "")
-    
-    # Ensure system paths are at the VERY front
-    new_path = os.pathsep.join(extra_paths + [current_path])
-    os.environ["PATH"] = new_path
-    
-    print(f"DEBUG: Updated PATH for yt-dlp: {os.environ['PATH']}")
-    
-    import shutil
-    node_path = shutil.which("node")
-    print(f"DEBUG: shutil.which('node') returns: {node_path}")
-
-    # Verify if the found node actually works
-    if node_path:
-        try:
-            node_version = subprocess.check_output([node_path, "--version"], stderr=subprocess.STDOUT, text=True).strip()
-            print(f"DEBUG: Node.js at {node_path} is version: {node_version}")
-            
-            # AGGRESSIVE FIX:
-            # Even if Conda node works, yt-dlp seems to ignore it in Systemd (maybe v24 issue or env issue).
-            # If we detect we are using Conda's node, FORCE switch to system node.
-            if "anaconda" in node_path or "envs" in node_path:
-                print("DEBUG: Detected Conda/Env Node.js. Forcing switch to System Node to fix yt-dlp issues.")
-                raise Exception("Force-skipping Conda Node")
-
-        except Exception as e:
-            print(f"WARNING: Node.js at {node_path} is BROKEN or SKIPPED: {e}")
-            print("Attempting to bypass broken/conda node by removing its path...")
-            # If the found node is broken (e.g. Conda one), remove it from PATH so system node can take over
-            broken_dir = os.path.dirname(node_path)
-            env_paths = os.environ["PATH"].split(os.pathsep)
-            # Filter out the broken directory
-            clean_paths = [p for p in env_paths if os.path.abspath(p) != os.path.abspath(broken_dir)]
-            # Re-add system paths just in case
-            clean_paths = extra_paths + clean_paths
-            os.environ["PATH"] = os.pathsep.join(clean_paths)
-            print(f"DEBUG: Cleaned PATH: {os.environ['PATH']}")
-            
-            # Re-check
-            new_node = shutil.which("node")
-            print(f"DEBUG: New shutil.which('node'): {new_node}")
-
-ensure_node_path()
+# Ensure Node.js is in PATH for yt-dlp - DEPRECATED, now explicitly pointing yt-dlp to node
+# Removed ensure_node_path() function
 
 cookie_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cookies.txt')
 print(f"Looking for cookies at: {cookie_path}")
@@ -101,13 +54,15 @@ ytdl_format_options = {
     # DEBUGGING ENABLED: Verbose logging to find why formats are missing
     'logtostderr': True,
     'quiet': False,
-    'no_warnings': False,
+    'no_warnings': True, # Keep warnings for yt-dlp issues, but not from other parts of the script
     'verbose': True,
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'cookiefile': cookie_path,
     # Enable yt-dlp caching to avoid re-downloading if file exists
-    'cachedir': cache_dir, 
+    'cachedir': cache_dir,
+    # Explicitly tell yt-dlp where to find node.js runtime
+    'js_runtimes': {'node': '/usr/bin/node'},
 }
 
 ffmpeg_options = {
