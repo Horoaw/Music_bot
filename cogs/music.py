@@ -76,7 +76,13 @@ ffmpeg_options = {
 # Separate options for streaming vs downloading
 ffmpeg_streaming_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10'
+    # Aggressive reconnect options to handle 403s and resets
+    # -reconnect 1: Enable auto-reconnection
+    # -reconnect_streamed 1: Allow reconnecting even for live streams
+    # -reconnect_delay_max 5: Wait up to 5s between retries
+    # -reconnect_on_network_error 1: Reconnect on TCP resets/broken pipes
+    # -reconnect_at_eof 1: Try to reconnect if stream ends prematurely
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1'
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
