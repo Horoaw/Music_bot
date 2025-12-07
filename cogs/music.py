@@ -51,9 +51,17 @@ def ensure_node_path():
         try:
             node_version = subprocess.check_output([node_path, "--version"], stderr=subprocess.STDOUT, text=True).strip()
             print(f"DEBUG: Node.js at {node_path} is version: {node_version}")
+            
+            # AGGRESSIVE FIX:
+            # Even if Conda node works, yt-dlp seems to ignore it in Systemd (maybe v24 issue or env issue).
+            # If we detect we are using Conda's node, FORCE switch to system node.
+            if "anaconda" in node_path or "envs" in node_path:
+                print("DEBUG: Detected Conda/Env Node.js. Forcing switch to System Node to fix yt-dlp issues.")
+                raise Exception("Force-skipping Conda Node")
+
         except Exception as e:
-            print(f"WARNING: Node.js at {node_path} is BROKEN: {e}")
-            print("Attempting to bypass broken node by removing its path...")
+            print(f"WARNING: Node.js at {node_path} is BROKEN or SKIPPED: {e}")
+            print("Attempting to bypass broken/conda node by removing its path...")
             # If the found node is broken (e.g. Conda one), remove it from PATH so system node can take over
             broken_dir = os.path.dirname(node_path)
             env_paths = os.environ["PATH"].split(os.pathsep)
