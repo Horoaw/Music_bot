@@ -48,7 +48,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'bestaudio[ext=webm]+bestaudio[ext=m4a]/bestaudio/best',
+    'format': 'bestaudio/best',
     # Save to cache directory using video ID to avoid duplicates
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
@@ -63,8 +63,7 @@ ytdl_format_options = {
     'cookiefile': cookie_path,
     # Enable yt-dlp caching to avoid re-downloading if file exists
     'cachedir': cache_dir, 
-    'extractor_args': {'youtube': {'player_client': ['android']}},
-    'force_ipv4': True,
+    'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
 }
 
 ffmpeg_options = {
