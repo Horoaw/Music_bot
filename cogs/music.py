@@ -82,7 +82,8 @@ ffmpeg_streaming_options = {
     # -reconnect_delay_max 5: Wait up to 5s between retries
     # -reconnect_on_network_error 1: Reconnect on TCP resets/broken pipes
     # -reconnect_at_eof 1: Try to reconnect if stream ends prematurely
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1'
+    # -user_agent: Spoof UA to look like a browser
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1 -user_agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"'
 }
 
 ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
