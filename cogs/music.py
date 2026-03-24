@@ -12,6 +12,7 @@ import json
 import aiohttp
 import sys
 import subprocess
+import traceback
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
@@ -145,13 +146,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
         loop = loop or asyncio.get_event_loop()
         
         # Extract info. If stream=False, this might download the file if not present.
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+        try:
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+        except Exception as e:
+            print(f"ERROR: Failed to extract info for {url}: {e}")
+            traceback.print_exc()
+            raise e
 
         if 'entries' in data:
             # take first item from a playlist
+            print(f"DEBUG: Extraction returned a playlist with {len(data['entries'])} entries. Taking the first one.")
             data = data['entries'][0]
 
         filename = data['url'] if stream else ytdl.prepare_filename(data)
+        print(f"DEBUG: Final filename/URL for playback: {filename}")
         
         _ffmpeg_options = {}
         
@@ -180,6 +188,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
                 # Also add -user_agent flag explicitly for protocols that use it directly
                 _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
+                
+                # Bilibili specific: Needs Referer
+                if "bilibili.com" in url or "b23.tv" in url:
+                    _ffmpeg_options['before_options'] += ' -referer "https://www.bilibili.com/"'
                 
                 print(f"DEBUG: Streaming with UA: {current_ua}")
             else:
@@ -214,6 +226,23 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 'duration': entry.get('duration', 0)
             })
         return results
+
+    @classmethod
+    async def bili_search_source(cls, query, *, loop=None):
+        """Specifically search Bilibili for fallback."""
+        loop = loop or asyncio.get_event_loop()
+        # Use bilisearch prefix for yt-dlp
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"bilisearch1:{query}", download=False))
+        
+        if 'entries' not in data or not data['entries']:
+            return None
+        
+        entry = data['entries'][0]
+        return {
+            'title': entry.get('title'),
+            'url': entry.get('webpage_url', entry.get('url')),
+            'duration': entry.get('duration', 0)
+        }
 
 class SearchSelect(discord.ui.Select):
     def __init__(self, ctx, results, music_cog):
@@ -253,22 +282,79 @@ class SearchSelect(discord.ui.Select):
         
         if self.ctx.voice_client and not self.ctx.voice_client.is_playing():
             await self.music_cog.play_next(self.ctx)
+        else:
+            await self.music_cog.update_player(self.ctx)
 
 class SearchView(discord.ui.View):
     def __init__(self, ctx, results, music_cog):
         super().__init__(timeout=60)
         self.add_item(SearchSelect(ctx, results, music_cog))
 
+class PlayerView(discord.ui.View):
+    def __init__(self, music_cog, ctx):
+        super().__init__(timeout=None)
+        self.music_cog = music_cog
+        self.ctx = ctx
+
+    @discord.ui.button(emoji="⏯️", style=discord.ButtonStyle.secondary)
+    async def play_pause(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.ctx.voice_client:
+            return await interaction.response.send_message("Bot is not connected.", ephemeral=True)
+        
+        if self.ctx.voice_client.is_playing():
+            self.ctx.voice_client.pause()
+            await interaction.response.send_message("Paused.", ephemeral=True)
+        elif self.ctx.voice_client.is_paused():
+            self.ctx.voice_client.resume()
+            await interaction.response.send_message("Resumed.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Nothing playing.", ephemeral=True)
+        
+        await self.music_cog.update_player(self.ctx)
+
+    @discord.ui.button(emoji="⏭️", style=discord.ButtonStyle.secondary)
+    async def skip(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.ctx.voice_client:
+            self.ctx.voice_client.stop()
+            await interaction.response.send_message("Skipped.", ephemeral=True)
+        else:
+            await interaction.response.send_message("Bot is not connected.", ephemeral=True)
+
+    @discord.ui.button(emoji="⏹️", style=discord.ButtonStyle.secondary)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.music_cog.queue.clear()
+        if self.ctx.voice_client:
+            self.ctx.voice_client.stop()
+        await interaction.response.send_message("Stopped and cleared queue.", ephemeral=True)
+        await self.music_cog.update_player(self.ctx)
+
+    @discord.ui.button(emoji="🔀", style=discord.ButtonStyle.secondary)
+    async def shuffle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.music_cog.is_shuffling = not self.music_cog.is_shuffling
+        status = "enabled" if self.music_cog.is_shuffling else "disabled"
+        await interaction.response.send_message(f"Shuffle {status}.", ephemeral=True)
+        await self.music_cog.update_player(self.ctx)
+
+    @discord.ui.button(emoji="🔁", style=discord.ButtonStyle.secondary)
+    async def loop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.music_cog.is_looping = not self.music_cog.is_looping
+        status = "enabled" if self.music_cog.is_looping else "disabled"
+        await interaction.response.send_message(f"Loop {status}.", ephemeral=True)
+        await self.music_cog.update_player(self.ctx)
+
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.queue = deque()
         self.current_song = None
+        self.current_source = None
+        self.player_messages = {} # guild_id -> Message
         self.is_looping = False
         self.is_shuffling = False
         self.autoplay = False
         self.playlist_dir = 'data/playlists'
         self.download_retries = set() # Track songs that failed streaming and need downloading
+        self.bili_retries = set()     # Track songs failing YouTube and retrying on Bilibili
         
         if not os.path.exists(self.playlist_dir):
             os.makedirs(self.playlist_dir)
@@ -315,6 +401,67 @@ class Music(commands.Cog):
             print(f"Error fetching Spotify tracks: {e}")
         return results
 
+    def create_player_embed(self, source, ctx):
+        embed = discord.Embed(
+            title="Now Playing",
+            description=f"**[{source.title}]({source.url})**",
+            color=0x1DB954 # Spotify Green
+        )
+        
+        if source.data.get('thumbnail'):
+            embed.set_thumbnail(url=source.data['thumbnail'])
+        
+        duration = source.data.get('duration')
+        if duration:
+            m, s = divmod(duration, 60)
+            duration_str = f"{int(m)}:{int(s):02d}"
+            embed.add_field(name="Duration", value=f"⏱️ {duration_str}", inline=True)
+        
+        status = "▶️ Playing"
+        if ctx.voice_client:
+            if ctx.voice_client.is_paused():
+                status = "⏸️ Paused"
+            elif not ctx.voice_client.is_playing():
+                status = "⏹️ Stopped"
+        
+        embed.add_field(name="Status", value=status, inline=True)
+        
+        loop_status = "✅ On" if self.is_looping else "❌ Off"
+        shuffle_status = "✅ On" if self.is_shuffling else "❌ Off"
+        embed.add_field(name="Loop", value=loop_status, inline=True)
+        embed.add_field(name="Shuffle", value=shuffle_status, inline=True)
+
+        if len(self.queue) > 0:
+            next_song = self.queue[0][0]
+            embed.add_field(name="Next Song", value=next_song[:50] + ("..." if len(next_song) > 50 else ""), inline=False)
+
+        embed.set_footer(text="Spotify Interactive Player", icon_url="https://www.scdn.co/mirror/assets/7.7.0/images/favicon.ico")
+        return embed
+
+    async def update_player(self, ctx, source=None):
+        if source:
+            self.current_source = source
+        
+        if not self.current_source:
+            return
+
+        embed = self.create_player_embed(self.current_source, ctx)
+        view = PlayerView(self, ctx)
+        
+        guild_id = ctx.guild.id
+        player_msg = self.player_messages.get(guild_id)
+
+        if player_msg:
+            try:
+                await player_msg.edit(embed=embed, view=view)
+            except:
+                # If editing fails (e.g. message deleted), send a new one
+                player_msg = await ctx.send(embed=embed, view=view)
+                self.player_messages[guild_id] = player_msg
+        else:
+            player_msg = await ctx.send(embed=embed, view=view)
+            self.player_messages[guild_id] = player_msg
+
     async def play_next(self, ctx):
         if self.is_looping and self.current_song:
             self.queue.appendleft(self.current_song)
@@ -350,7 +497,8 @@ class Music(commands.Cog):
                 
                 def after_playing(error):
                     if error:
-                        print(f"Player error: {error}")
+                        print(f"PLAYER ERROR (after_playing) for {query}: {error}")
+                        traceback.print_exc()
                         # Check if it was a 403 or streaming error
                         # If we were streaming, try downloading next time
                         if not should_download:
@@ -373,34 +521,90 @@ class Music(commands.Cog):
                                   self.bot.loop.create_task(self.play_next(ctx))
                                   return
 
-                             self.bot.loop.create_task(self.safe_send(ctx, f"Player error: {error}"))
+                             # YouTube download failed, TRY BILIBILI FALLBACK
+                             print(f"YouTube download failed for {query}. Checking Bilibili fallback...")
+                             if query not in self.bili_retries:
+                                 self.bili_retries.add(query)
+                                 
+                                 # Start fallback task
+                                 async def bili_fallback_task():
+                                     await self.safe_send(ctx, f"⚠️ YouTube playback failed for **{query}**. Searching on Bilibili...")
+                                     try:
+                                         bili_res = await YTDLSource.bili_search_source(query, loop=self.bot.loop)
+                                         if bili_res:
+                                             await self.safe_send(ctx, f"🔍 Found on Bilibili: **{bili_res['title']}**. Adding to queue.")
+                                             self.queue.appendleft((bili_res['url'], requester_id))
+                                         else:
+                                             await self.safe_send(ctx, f"❌ Could not find **{query}** on Bilibili.")
+                                     except Exception as bili_err:
+                                         print(f"Bilibili fallback search failed for {query}: {bili_err}")
+                                         await self.safe_send(ctx, f"❌ Bilibili fallback failed.")
+                                     await self.play_next(ctx)
+                                 
+                                 self.bot.loop.create_task(bili_fallback_task())
+                                 return
+
+                             self.bot.loop.create_task(self.safe_send(ctx, f"Critical player error for **{query}**: {error}"))
                     
                     # If successful (or failed download), remove from retries and move on
                     if query in self.download_retries:
                         self.download_retries.remove(query)
+                    
+                    if query in self.bili_retries:
+                        self.bili_retries.remove(query)
                         
                     self.bot.loop.create_task(self.play_next(ctx))
 
                 if ctx.voice_client:
                     ctx.voice_client.play(source, after=after_playing)
-                    await self.safe_send(ctx, f'Now playing: **{source.title}**')
+                    await self.update_player(ctx, source)
                 else:
                     await self.safe_send(ctx, "Error: Bot is not connected to voice.")
             
             except Exception as e:
-                error_msg = f"Error playing **{query}**: {e}"
+                error_msg = f"❌ Error loading **{query}**: {e}"
                 str_e = str(e)
                 if "Sign in to confirm your age" in str_e or "Sign in to confirm you’re not a bot" in str_e:
                     error_msg += "\n⚠️ **Authentication Required**: Please upload a valid `cookies.txt` file to the server root directory to play this video."
                 
+                print(f"ERROR playing {query}: {e}")
+                traceback.print_exc()
+                
                 await self.safe_send(ctx, error_msg)
-                print(f"Error playing {query}: {e}")
+                
                 # If extraction fails, maybe try downloading?
                 if not should_download:
                      # Caution: We can't know if it's live if extraction failed. 
                      # Safe bet: Try download unless we already know it's a retry.
+                     print(f"Extraction failed for {query}. Adding to download retries.")
                      self.download_retries.add(query)
                      self.queue.appendleft((query, requester_id))
+                else:
+                     # If it already failed with download, TRY BILIBILI FALLBACK
+                     print(f"FAILED twice for {query} (even with download). Checking Bilibili fallback...")
+                     
+                     if query not in self.bili_retries:
+                         self.bili_retries.add(query)
+                         
+                         # If it's a search term, use it. If it's a URL, try searching by title if we have it, else search by original query
+                         search_term = query
+                         # Basic check if it's a URL - if so, search Bilibili using the same URL might work if yt-dlp supports it as search
+                         
+                         await self.safe_send(ctx, f"⚠️ YouTube failed for **{query}**. Searching on Bilibili...")
+                         try:
+                             bili_res = await YTDLSource.bili_search_source(search_term, loop=self.bot.loop)
+                             if bili_res:
+                                 await self.safe_send(ctx, f"🔍 Found on Bilibili: **{bili_res['title']}**. Adding to queue.")
+                                 self.queue.appendleft((bili_res['url'], requester_id))
+                             else:
+                                 await self.safe_send(ctx, f"❌ Could not find **{query}** on Bilibili.")
+                         except Exception as bili_err:
+                             print(f"Bilibili fallback search failed for {query}: {bili_err}")
+                             await self.safe_send(ctx, f"❌ Bilibili fallback failed.")
+                     
+                     if query in self.download_retries:
+                         self.download_retries.remove(query)
+
                 await self.play_next(ctx)
         else:
             self.current_song = None
@@ -485,6 +689,8 @@ class Music(commands.Cog):
 
         if ctx.voice_client and not ctx.voice_client.is_playing():
             await self.play_next(ctx)
+        else:
+            await self.update_player(ctx)
 
     @commands.hybrid_command(name='search', description="Searches YouTube and lets you select a song.")
     @app_commands.describe(query="The search term for YouTube.")
@@ -643,6 +849,8 @@ class Music(commands.Cog):
         await ctx.send(f"Loaded {len(tracks)} songs from **{name}**.")
         if ctx.voice_client and not ctx.voice_client.is_playing():
             await self.play_next(ctx)
+        else:
+            await self.update_player(ctx)
 
     @playlist.command(name='delete', description="Deletes a playlist.")
     @app_commands.describe(name="The name of the playlist to delete.")
@@ -697,11 +905,22 @@ class Music(commands.Cog):
         await ctx.send(f"Removed **{removed}** from playlist **{name}**.")
 
     # --- Standard Controls ---
+    @commands.hybrid_command(name='nowplaying', aliases=['np'], description="Shows the current playing song with controls.")
+    async def nowplaying(self, ctx: commands.Context):
+        if not self.current_source:
+            return await ctx.send("Nothing is playing.")
+        
+        # Clear existing player message reference for this guild to force a new message if desired, 
+        # or just update it. Here we update.
+        await self.update_player(ctx)
+
     @commands.hybrid_command(name='skip', aliases=['s'], description="Skips the current song.")
     async def skip(self, ctx: commands.Context):
-        if ctx.voice_client and ctx.voice_client.is_playing():
+        if ctx.voice_client and (ctx.voice_client.is_playing() or ctx.voice_client.is_paused()):
             ctx.voice_client.stop()
             await ctx.send("Skipped.")
+        else:
+            await ctx.send("Nothing to skip.")
 
     @commands.hybrid_command(name='stop', description="Stops playback and clears the queue.")
     async def stop(self, ctx: commands.Context):
@@ -709,6 +928,7 @@ class Music(commands.Cog):
         if ctx.voice_client:
             ctx.voice_client.stop()
         await ctx.send("Stopped.")
+        await self.update_player(ctx)
 
     @commands.hybrid_command(name='queue', aliases=['q'], description="Displays the current queue.")
     async def queue_info(self, ctx: commands.Context):
@@ -724,16 +944,19 @@ class Music(commands.Cog):
     @commands.hybrid_command(name='shuffle', description="Shuffles the current queue.")
     async def shuffle(self, ctx: commands.Context):
         if len(self.queue) < 2:
-            return await ctx.send("Not enough songs.")
+            return await ctx.send("Not enough songs to shuffle.")
         temp = list(self.queue)
         random.shuffle(temp)
         self.queue = deque(temp)
         await ctx.send("Queue shuffled.")
+        await self.update_player(ctx)
 
     @commands.hybrid_command(name='loop', description="Toggles loop mode for the current song.")
     async def loop(self, ctx: commands.Context):
         self.is_looping = not self.is_looping
-        await ctx.send(f"Loop: **{self.is_looping}**")
+        status = "On" if self.is_looping else "Off"
+        await ctx.send(f"Loop: **{status}**")
+        await self.update_player(ctx)
 
     @commands.hybrid_command(name='radio', description="Plays a radio stream.")
     @app_commands.describe(genre="The genre of the radio to play (e.g., lofi, jazz).")
@@ -747,63 +970,63 @@ class Music(commands.Cog):
         if ctx.voice_client:
             await ctx.voice_client.disconnect()
 
-    @commands.hybrid_command(name='help', description="Shows available commands (English/Chinese). | 显示可用命令 (中/英).")
+    @commands.hybrid_command(name='help', description="Shows available commands.")
     async def help(self, ctx: commands.Context):
         embed = discord.Embed(
-            title="🎵 Music Bot Help / 音乐机器人帮助",
-            description="Here are the available commands / 以下是可用命令:",
+            title="🎵 Music Bot Help",
+            description="Here are the available commands:",
             color=discord.Color.blue()
         )
 
         # General Commands
         embed.add_field(
             name="▶️ **!play / !p <url|query>**",
-            value="Plays a song from URL or search term.\n播放链接或搜索关键词对应的歌曲。",
+            value="Plays a song from URL or search term.",
             inline=False
         )
         embed.add_field(
             name="🔍 **!search <query>**",
-            value="Searches YouTube and lets you select a song.\n搜索 YouTube 并让你选择一首歌曲。",
+            value="Searches YouTube and lets you select a song.",
             inline=False
         )
         embed.add_field(
             name="⏭️ **!skip / !s**",
-            value="Skips the current song.\n跳过当前播放的歌曲。",
+            value="Skips the current song.",
             inline=False
         )
         embed.add_field(
             name="⏹️ **!stop**",
-            value="Stops playback and clears the queue.\n停止播放并清空播放队列。",
+            value="Stops playback and clears the queue.",
             inline=False
         )
         embed.add_field(
             name="📜 **!queue / !q**",
-            value="Displays the current song queue.\n显示当前的播放队列。",
+            value="Displays the current song queue.",
             inline=False
         )
         embed.add_field(
             name="🔀 **!shuffle**",
-            value="Shuffles the current queue.\n随机打乱播放队列。",
+            value="Shuffles the current queue.",
             inline=False
         )
         embed.add_field(
             name="🔁 **!loop**",
-            value="Toggles loop mode for the current song.\n切换当前歌曲的循环模式。",
+            value="Toggles loop mode for the current song.",
             inline=False
         )
         embed.add_field(
             name="📻 **!radio [genre]**",
-            value="Plays a live radio stream (default: lofi).\n播放直播电台 (默认: lofi)。",
+            value="Plays a live radio stream (default: lofi).",
             inline=False
         )
         embed.add_field(
             name="📂 **!playlist**",
-            value="Playlist commands: `create`, `add`, `remove`, `list`, `load`, `delete`.\n播放列表命令: `create`, `add`, `remove`, `list`, `load`, `delete`。",
+            value="Playlist commands: `create`, `add`, `remove`, `list`, `load`, `delete`.",
             inline=False
         )
         embed.add_field(
             name="🚪 **!leave**",
-            value="Disconnects the bot from the voice channel.\n断开机器人与语音频道的连接。",
+            value="Disconnects the bot from the voice channel.",
             inline=False
         )
 

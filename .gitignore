@@ -42,3 +42,5 @@ mlruns/
 
 # Ignore playlist data to prevent overwriting server data
 data/playlists/*.json
+# Sync Scripts
+scripts/sync_cookies.sh
