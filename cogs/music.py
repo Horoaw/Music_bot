@@ -87,7 +87,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'bestaudio/best',
+    'format': 'best',
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
     'noplaylist': True,
@@ -101,7 +101,8 @@ ytdl_format_options = {
     'force_ipv4': True,
     'cookiefile': cookie_path,
     'cachedir': cache_dir,
-    'youtube_include_dash_manifest': False,
+    'youtube_include_dash_manifest': True,
+    'http_chunk_size': 10485760,
 }
 
 ffmpeg_options = {
@@ -238,22 +239,41 @@ class YTDLSource(discord.PCMVolumeTransformer):
         """Specifically search Bilibili for fallback using YouTube search or direct bilisearch."""
         loop = loop or asyncio.get_event_loop()
         
-        # Try ytsearch for Bilibili first as it's often more reliable than the native bilisearch extractor
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch1:bilibili {query}", download=False))
-        
-        if 'entries' not in data or not data['entries']:
-            # Fallback to direct bilisearch if ytsearch returns nothing
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"bilisearch1:{query}", download=False))
-        
-        if 'entries' not in data or not data['entries']:
-            return None
-        
-        entry = data['entries'][0]
-        return {
-            'title': entry.get('title'),
-            'url': entry.get('webpage_url', entry.get('url')),
-            'duration': entry.get('duration', 0)
+        # Custom headers for Bilibili
+        bili_opts = ytdl_format_options.copy()
+        current_ua = random.choice(USER_AGENTS)
+        bili_opts['http_headers'] = {
+            'User-Agent': current_ua,
+            'Referer': 'https://www.bilibili.com/',
         }
+        
+        bili_ytdl = yt_dlp.YoutubeDL(bili_opts)
+        
+        try:
+            # Try direct bilisearch first as it's more focused
+            data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"bilisearch1:{query}", download=False))
+            
+            if 'entries' not in data or not data['entries']:
+                # Fallback to searching Bilibili via YouTube search if direct fails
+                data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"ytsearch1:bilibili {query}", download=False))
+            
+            if 'entries' not in data or not data['entries']:
+                # Try a direct URL search if keywords are failing
+                data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"https://search.bilibili.com/all?keyword={query}", download=False))
+
+            if 'entries' not in data or not data['entries']:
+                return None
+            
+            entry = data['entries'][0]
+            return {
+                'title': entry.get('title'),
+                'url': entry.get('webpage_url', entry.get('url')),
+                'duration': entry.get('duration', 0)
+            }
+        except Exception:
+            print(f"DEBUG: Bilibili search failed for query: {query}")
+            traceback.print_exc()
+            return None
 
 class SearchSelect(discord.ui.Select):
     def __init__(self, ctx, results, music_cog):
@@ -541,11 +561,16 @@ class Music(commands.Cog):
                 def after_playing(error):
                     if error:
                         # Print error to console
-                        print(f"ERROR: Playback error for {query}: {error}")
+                        err_str = str(error)
+                        print(f"ERROR: Playback error for {query}: {err_str}")
                         
                         async def handle_error():
                             # Send descriptive message
-                            await self.safe_send(ctx, f"ERROR: Playback failed for: {query}")
+                            user_msg = f"ERROR: Playback failed for: {query}"
+                            if "Requested format is not available" in err_str:
+                                user_msg += " (Possibly region locked or restricted format)"
+                            
+                            await self.safe_send(ctx, user_msg)
                             
                             is_bili = "bilibili.com" in query or "b23.tv" in query
                             if not is_bili:
@@ -574,12 +599,16 @@ class Music(commands.Cog):
                     await self.safe_send(ctx, "ERROR: Not connected to voice.")
             
             except Exception as e:
-                print(f"ERROR: Playback failed for {query}: {e}")
+                err_str = str(e)
+                print(f"ERROR: Playback failed for {query}: {err_str}")
                 
                 # If YouTube extraction fails, immediately trigger Bilibili fallback
                 is_bili = "bilibili.com" in query or "b23.tv" in query
                 if not is_bili:
-                    await self.safe_send(ctx, f"ERROR: YouTube extraction failed for: {query}")
+                    user_msg = f"ERROR: YouTube extraction failed for: {query}"
+                    if "Requested format is not available" in err_str:
+                        user_msg += " (Possibly region locked or restricted format)"
+                    await self.safe_send(ctx, user_msg)
                     await self.trigger_bili_fallback(ctx, query, requester_id)
                 else:
                     # Bilibili also failed or was the original source
