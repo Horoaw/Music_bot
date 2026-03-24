@@ -88,7 +88,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'ba/b',
+    'format': 'bestaudio/best',
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
     'noplaylist': True,
@@ -325,8 +325,7 @@ class Music(commands.Cog):
         # YouTube specific options
         yt_opts = ytdl_format_options.copy()
         yt_opts.update({
-            'format': 'ba',
-            'format_sort': ['abr', 'ext:m4a'],
+            'format': 'bestaudio/best',
             'cookiefile': cookie_path,
             'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
             'geo_bypass': True,
