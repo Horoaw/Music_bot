@@ -87,7 +87,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'best',
+    'format': 'ba/b',
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
     'noplaylist': True,
@@ -103,6 +103,7 @@ ytdl_format_options = {
     'cachedir': cache_dir,
     'youtube_include_dash_manifest': True,
     'http_chunk_size': 10485760,
+    'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
 }
 
 ffmpeg_options = {
@@ -147,6 +148,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
         except Exception as e:
             err_msg = str(e).strip().split('\n')[-1]
             print(f"ERROR: Failed to extract info for {url}: {err_msg}")
+            
+            # Specific hint for "Requested format is not available"
+            if "Requested format is not available" in err_msg:
+                err_msg += " (Server IP might be throttled or mobile client bypass failed)"
+                
             if ctx:
                 music_cog = ctx.bot.get_cog('Music')
                 if music_cog:
@@ -568,7 +574,7 @@ class Music(commands.Cog):
                             # Send descriptive message
                             user_msg = f"ERROR: Playback failed for: {query}"
                             if "Requested format is not available" in err_str:
-                                user_msg += " (Possibly region locked or restricted format)"
+                                user_msg += " (Server IP might be throttled or mobile client bypass failed)"
                             
                             await self.safe_send(ctx, user_msg)
                             
@@ -607,7 +613,7 @@ class Music(commands.Cog):
                 if not is_bili:
                     user_msg = f"ERROR: YouTube extraction failed for: {query}"
                     if "Requested format is not available" in err_str:
-                        user_msg += " (Possibly region locked or restricted format)"
+                        user_msg += " (Server IP might be throttled or mobile client bypass failed)"
                     await self.safe_send(ctx, user_msg)
                     await self.trigger_bili_fallback(ctx, query, requester_id)
                 else:
