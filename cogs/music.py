@@ -165,7 +165,24 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if 'title' not in data:
             data['title'] = "Unknown Title"
         
-        filename = data.get('url') if stream else ytdl_instance.prepare_filename(data)
+        # Robust URL extraction
+        filename = data.get('url')
+        if not filename and 'formats' in data:
+            # Try to find the best audio format from the list if top-level url is missing
+            formats = data['formats']
+            # Sort formats to find best audio
+            try:
+                # Filter for formats that have a URL
+                valid_formats = [f for f in formats if f.get('url')]
+                if valid_formats:
+                    # If we find a format that matches our preferred ID or just take the last one (usually best)
+                    filename = valid_formats[-1].get('url')
+            except:
+                pass
+
+        if not stream:
+            filename = ytdl_instance.prepare_filename(data)
+
         if not filename:
              raise Exception("The extracted data does not contain a valid URL or filename for playback.")
         
@@ -550,7 +567,7 @@ class Music(commands.Cog):
                 
                 def after_playing(error):
                     if error:
-                        print(f"ERROR: {query}: {error}")
+                        print(f"ERROR: Playback error for {query}: {error}")
                         async def handle_error():
                             if source_type == 'youtube':
                                  await self.trigger_bili_fallback(ctx, query, requester_id)
@@ -570,7 +587,10 @@ class Music(commands.Cog):
                 await self.update_player(ctx, source)
             
             except Exception as e:
-                print(f"ERROR: {query}: {e}")
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"ERROR: Playback initialization failed for {query}:\n{error_trace}")
+                
                 if source_type == 'youtube':
                     await self.trigger_bili_fallback(ctx, query, requester_id)
                 else:
