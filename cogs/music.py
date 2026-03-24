@@ -251,8 +251,8 @@ class SearchSelect(discord.ui.Select):
         self.music_cog.queue.append((selected_song['url'], self.ctx.author.id))
         await interaction.followup.send(f"Selected and queued: **{selected_song['title']}**")
         
-        if not self.ctx.voice_client.is_playing():
-            self.music_cog.play_next(self.ctx)
+        if self.ctx.voice_client and not self.ctx.voice_client.is_playing():
+            await self.music_cog.play_next(self.ctx)
 
 class SearchView(discord.ui.View):
     def __init__(self, ctx, results, music_cog):
@@ -381,8 +381,11 @@ class Music(commands.Cog):
                         
                     self.bot.loop.create_task(self.play_next(ctx))
 
-                ctx.voice_client.play(source, after=after_playing)
-                await self.safe_send(ctx, f'Now playing: **{source.title}**')
+                if ctx.voice_client:
+                    ctx.voice_client.play(source, after=after_playing)
+                    await self.safe_send(ctx, f'Now playing: **{source.title}**')
+                else:
+                    await self.safe_send(ctx, "Error: Bot is not connected to voice.")
             
             except Exception as e:
                 error_msg = f"Error playing **{query}**: {e}"
@@ -480,7 +483,7 @@ class Music(commands.Cog):
             self.queue.append((query, ctx.author.id))
             await ctx.send(f"Added to queue: {query}")
 
-        if not ctx.voice_client.is_playing():
+        if ctx.voice_client and not ctx.voice_client.is_playing():
             await self.play_next(ctx)
 
     @commands.hybrid_command(name='search', description="Searches YouTube and lets you select a song.")
@@ -638,7 +641,7 @@ class Music(commands.Cog):
             self.queue.append((track, ctx.author.id))
         
         await ctx.send(f"Loaded {len(tracks)} songs from **{name}**.")
-        if not ctx.voice_client.is_playing():
+        if ctx.voice_client and not ctx.voice_client.is_playing():
             await self.play_next(ctx)
 
     @playlist.command(name='delete', description="Deletes a playlist.")
