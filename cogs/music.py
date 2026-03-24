@@ -105,7 +105,11 @@ ytdl_format_options = {
     'youtube_include_hls_manifest': True,
     'check_formats': False,
     'http_chunk_size': 10485760,
-    'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'web_embedded', 'tv'], 'skip': ['webpage']}},
+    'extractor_args': {'youtube': {'player_client': ['android', 'ios'], 'skip': ['webpage']}},
+    'format_sort': ['res:720', 'ext:mp4:m4a'],
+    'sleep_interval': 1,
+    'max_sleep_interval': 3,
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
 
 ffmpeg_options = {
@@ -259,8 +263,12 @@ class YTDLSource(discord.PCMVolumeTransformer):
         bili_ytdl = yt_dlp.YoutubeDL(bili_opts)
         
         try:
-            # Try direct bilisearch first as it's more focused
-            data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"bilisearch1:{query}", download=False))
+            # Try direct bili prefix first as requested
+            data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"bili:{query}", download=False))
+            
+            if 'entries' not in data or not data['entries']:
+                # Fallback to bilisearch if bili: fails
+                data = await loop.run_in_executor(None, lambda: bili_ytdl.extract_info(f"bilisearch1:{query}", download=False))
             
             if 'entries' not in data or not data['entries']:
                 # Fallback to searching Bilibili via YouTube search if direct fails
@@ -385,6 +393,8 @@ class PlayerView(discord.ui.View):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        global ytdl
+        ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
         self.queue = deque()
         self.current_song = None
         self.current_source = None
@@ -513,21 +523,35 @@ class Music(commands.Cog):
             return
 
         self.bili_retries.add(query)
-        await self.safe_send(ctx, f"FALLBACK: YouTube failed. Waiting 2s before searching Bilibili for: {query}")
+        
+        # Clean query: strip URL characters and domain names to leave JUST keywords
+        import re
+        search_query = query
+        if search_query.startswith('http'):
+            # Remove domain parts
+            search_query = re.sub(r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/|bilibili\.com/video/)', '', search_query)
+            # Remove all other punctuation and URL-like chars
+            search_query = re.sub(r'[^\w\s]', ' ', search_query)
+        
+        search_query = ' '.join(search_query.split()).strip()
+        if not search_query:
+            search_query = query # Fallback if cleaning wiped everything
+
+        await self.safe_send(ctx, f"FALLBACK: YouTube failed. Searching Bilibili for: {search_query}")
         await asyncio.sleep(2) # Avoid rate limiting
         
         try:
-            bili_res = await YTDLSource.bili_search_source(query, loop=self.bot.loop)
+            bili_res = await YTDLSource.bili_search_source(search_query, loop=self.bot.loop)
             
             # If nothing found, try a broader search
             if not bili_res:
-                 bili_res = await YTDLSource.bili_search_source(f"bilibili {query}", loop=self.bot.loop)
+                 bili_res = await YTDLSource.bili_search_source(f"bilibili {search_query}", loop=self.bot.loop)
 
             if bili_res:
                 await self.safe_send(ctx, f"SUCCESS: Found on Bilibili: {bili_res['title']}")
                 self.queue.appendleft((bili_res['url'], requester_id))
             else:
-                await self.safe_send(ctx, f"ERROR: No results on Bilibili for: {query}")
+                await self.safe_send(ctx, f"ERROR: No results on Bilibili for: {search_query}")
                 self.bili_retries.remove(query)
         except Exception as bili_err:
             print(f"Bilibili fallback search failed for {query}: {bili_err}")
