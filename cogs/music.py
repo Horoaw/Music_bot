@@ -156,9 +156,17 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if 'entries' in data:
             # take first item from a playlist
             print(f"DEBUG: Extraction returned a playlist with {len(data['entries'])} entries. Taking the first one.")
+            if not data['entries']:
+                raise Exception("No search results found.")
             data = data['entries'][0]
 
-        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        if not data:
+            raise Exception("Failed to extract any data from the provided URL/query.")
+
+        filename = data.get('url') if stream else ytdl.prepare_filename(data)
+        if not filename:
+             raise Exception("The extracted data does not contain a valid URL or filename for playback.")
+        
         print(f"DEBUG: Final filename/URL for playback: {filename}")
         
         _ffmpeg_options = {}
@@ -473,7 +481,15 @@ class Music(commands.Cog):
             query, requester_id = self.queue.popleft()
             self.current_song = (query, requester_id)
             
+            # Prepend ytsearch: if not a URL to ensure yt-dlp treats it as a search
+            search_query = query
+            if not query.startswith('http'):
+                search_query = f"ytsearch:{query}"
+
             try:
+                # Add a "Processing..." message so the user knows the bot is working
+                await self.safe_send(ctx, f"🔍 Processing **{query}**...")
+
                 if not ctx.voice_client:
                     guild = ctx.guild
                     requester = guild.get_member(requester_id)
@@ -493,7 +509,7 @@ class Music(commands.Cog):
                      print(f"Retry Mode: Downloading {query}...")
                      await self.safe_send(ctx, f"⬇️ Downloading **{query}** to server cache (Streaming failed)...")
                 
-                source = await YTDLSource.from_url(query, loop=self.bot.loop, stream=not should_download)
+                source = await YTDLSource.from_url(search_query, loop=self.bot.loop, stream=not should_download)
                 
                 def after_playing(error):
                     if error:
@@ -562,7 +578,8 @@ class Music(commands.Cog):
                     await self.safe_send(ctx, "Error: Bot is not connected to voice.")
             
             except Exception as e:
-                error_msg = f"❌ Error loading **{query}**: {e}"
+                # Descriptive error message for Discord to help debug "immediate Queue finished"
+                error_msg = f"❌ **Error loading song**: `{query}`\n**Reason**: {e}"
                 str_e = str(e)
                 if "Sign in to confirm your age" in str_e or "Sign in to confirm you’re not a bot" in str_e:
                     error_msg += "\n⚠️ **Authentication Required**: Please upload a valid `cookies.txt` file to the server root directory to play this video."
@@ -570,7 +587,13 @@ class Music(commands.Cog):
                 print(f"ERROR playing {query}: {e}")
                 traceback.print_exc()
                 
-                await self.safe_send(ctx, error_msg)
+                # Use ctx.channel.send as a fallback if safe_send fails (e.g., if interaction expired)
+                sent = await self.safe_send(ctx, error_msg)
+                if sent is None:
+                    try:
+                        await ctx.channel.send(error_msg)
+                    except Exception as fallback_error:
+                        print(f"CRITICAL: Failed to send error message even with fallback: {fallback_error}")
                 
                 # If extraction fails, maybe try downloading?
                 if not should_download:
@@ -586,9 +609,8 @@ class Music(commands.Cog):
                      if query not in self.bili_retries:
                          self.bili_retries.add(query)
                          
-                         # If it's a search term, use it. If it's a URL, try searching by title if we have it, else search by original query
+                         # Search term fallback
                          search_term = query
-                         # Basic check if it's a URL - if so, search Bilibili using the same URL might work if yt-dlp supports it as search
                          
                          await self.safe_send(ctx, f"⚠️ YouTube failed for **{query}**. Searching on Bilibili...")
                          try:
@@ -655,11 +677,15 @@ class Music(commands.Cog):
     async def play(self, ctx: commands.Context, *, query: str):
         await ctx.defer() 
         
+        query = query.strip()
+        if not query:
+            return await ctx.send("❌ Please provide a song name or URL.")
+        
         if not await self.ensure_voice(ctx):
             return
             
         if not ctx.voice_client:
-            return await ctx.send("Error: Failed to verify voice connection.")
+            return await ctx.send("❌ Error: Failed to verify voice connection.")
 
         # Sanitize YouTube URL: If it has v= and list=, strip the list part to avoid yt-dlp Mix errors
         if 'youtube.com/watch' in query and 'list=' in query:
@@ -676,16 +702,20 @@ class Music(commands.Cog):
                 print(f"Error sanitizing URL: {e}")
 
         if 'spotify.com' in query:
-            msg = await ctx.send("Processing Spotify link...")
+            msg = await ctx.send("🔍 Processing Spotify link...")
             tracks = await self.get_spotify_tracks(query)
             if not tracks:
-                return await msg.edit(content="Could not load Spotify tracks.")
+                return await msg.edit(content="❌ Could not load Spotify tracks.")
             for track in tracks:
                 self.queue.append((track, ctx.author.id))
-            await msg.edit(content=f"Queued {len(tracks)} tracks from Spotify.")
+            await msg.edit(content=f"✅ Queued {len(tracks)} tracks from Spotify.")
         else:
             self.queue.append((query, ctx.author.id))
-            await ctx.send(f"Added to queue: {query}")
+            # If not a URL, indicate it's a search
+            display_query = query
+            if not query.startswith('http'):
+                 display_query = f"🔍 {query}"
+            await ctx.send(f"✅ Added to queue: {display_query}")
 
         if ctx.voice_client and not ctx.voice_client.is_playing():
             await self.play_next(ctx)
@@ -699,14 +729,14 @@ class Music(commands.Cog):
         if not await self.ensure_voice(ctx):
             return
 
-        msg = await ctx.send(f"Searching for **{query}**...")
+        msg = await ctx.send(f"🔍 Searching for **{query}**...")
         try:
             results = await YTDLSource.search_source(query, loop=self.bot.loop)
         except Exception as e:
-             return await msg.edit(content=f"Error searching: {e}")
+             return await msg.edit(content=f"❌ Error searching: {e}")
         
         if not results:
-            return await msg.edit(content="No results found.")
+            return await msg.edit(content="❌ No results found.")
         
         view = SearchView(ctx, results, self)
         await msg.edit(content="Select a song to play:", view=view)
@@ -751,11 +781,11 @@ class Music(commands.Cog):
     async def pl_create(self, ctx: commands.Context, name: str):
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if os.path.exists(filepath):
-            return await ctx.send(f"Playlist **{name}** already exists.")
+            return await ctx.send(f"❌ Playlist **{name}** already exists.")
         
         with open(filepath, 'w') as f:
             json.dump([], f)
-        await ctx.send(f"Playlist **{name}** created.")
+        await ctx.send(f"✅ Playlist **{name}** created.")
 
     @playlist.command(name='add', description="Adds songs to a playlist. Supports URLs, search terms (comma-separated), or playlists.")
     @app_commands.describe(name="The name of the playlist.", song_query="URLs/Terms (separate with comma for multiple), or a Playlist URL.")
@@ -764,14 +794,14 @@ class Music(commands.Cog):
         await ctx.defer() 
         filepath = os.path.join(self.playlist_dir, f"{name}.json")
         if not os.path.exists(filepath):
-            return await ctx.send(f"Playlist **{name}** not found.")
+            return await ctx.send(f"❌ Playlist **{name}** not found.")
         
         with open(filepath, 'r') as f:
             tracks = json.load(f)
 
         added_count = 0
         if 'list=' in song_query and ('youtube.com/playlist' in song_query or 'youtube.com/watch' in song_query): 
-            msg = await ctx.send("Processing YouTube playlist...")
+            msg = await ctx.send("🔍 Processing YouTube playlist...")
             try:
                 loop = self.bot.loop or asyncio.get_event_loop()
                 data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_query, download=False, process_info=False)) 
@@ -781,21 +811,21 @@ class Music(commands.Cog):
                         song_info = await loop.run_in_executor(None, lambda: ytdl.extract_info(entry['url'], download=False))
                         tracks.append(song_info.get('webpage_url', song_info.get('url', song_info.get('title'))))
                         added_count += 1
-                await msg.edit(content=f"Added {added_count} songs from YouTube playlist to **{name}**.")
+                await msg.edit(content=f"✅ Added {added_count} songs from YouTube playlist to **{name}**.")
             except Exception as e:
-                await msg.edit(content=f"Error processing YouTube playlist: {e}")
+                await msg.edit(content=f"❌ Error processing YouTube playlist: {e}")
                 print(f"Error processing YouTube playlist: {e}")
                 return
         elif 'spotify.com' in song_query:
-            msg = await ctx.send("Processing Spotify link...")
+            msg = await ctx.send("🔍 Processing Spotify link...")
             spotify_tracks = await self.get_spotify_tracks(song_query)
             if not spotify_tracks:
-                await msg.edit(content="Could not load Spotify tracks.")
+                await msg.edit(content="❌ Could not load Spotify tracks.")
                 return
             for track_title in spotify_tracks:
                 tracks.append(track_title)
                 added_count += 1
-            await msg.edit(content=f"Added {added_count} songs from Spotify link to **{name}**.")
+            await msg.edit(content=f"✅ Added {added_count} songs from Spotify link to **{name}**.")
         else:
             songs_to_add = [s.strip() for s in song_query.replace('|', ',').split(',') if s.strip()]
             
@@ -804,21 +834,14 @@ class Music(commands.Cog):
                 added_count += 1
             
             if added_count > 1:
-                await ctx.send(f"Added {added_count} songs to playlist **{name}**:\n" + ", ".join(songs_to_add)[:1900])
+                await ctx.send(f"✅ Added {added_count} songs to playlist **{name}**:\n" + ", ".join(songs_to_add)[:1900])
             elif added_count == 1:
-                await ctx.send(f"Added **{songs_to_add[0]}** to playlist **{name}**.")
+                await ctx.send(f"✅ Added **{songs_to_add[0]}** to playlist **{name}**.")
             else:
-                await ctx.send("No valid songs found to add.")
+                await ctx.send("❌ No valid songs found to add.")
 
         with open(filepath, 'w') as f:
             json.dump(tracks, f)
-
-    async def play_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        if current.startswith(('http://', 'https://')):
-            return []
-        if not current:
-            return []
-        # ... (rest of the play_autocomplete logic)
 
 
     @playlist.command(name='list', description="Lists all saved playlists.")
