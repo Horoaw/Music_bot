@@ -99,18 +99,10 @@ ytdl_format_options = {
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'force_ipv4': True,
-    'cookiefile': cookie_path,
     'cachedir': cache_dir,
-    'youtube_include_dash_manifest': True,
-    'youtube_include_hls_manifest': True,
-    'check_formats': False,
-    'http_chunk_size': 10485760,
-    'extractor_args': {'youtube': {'player_client': ['tv', 'web_embedded']}},
     'ignore_no_formats_error': True,
-    'format_sort': ['res:720', 'ext:mp4:m4a'],
     'sleep_interval': 1,
     'max_sleep_interval': 3,
-    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
 
 ffmpeg_options = {
@@ -133,8 +125,6 @@ USER_AGENTS = [
     "Mozilla/5.0 (iPhone; CPU iPhone OS 14_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Mobile/15E148 Safari/604.1"
 ]
 
-ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
-
 class YTDLSource(discord.PCMVolumeTransformer):
     def __init__(self, source, *, data, filename=None, volume=0.5):
         super().__init__(source, volume)
@@ -146,40 +136,19 @@ class YTDLSource(discord.PCMVolumeTransformer):
         self.is_live = data.get('is_live', False)
 
     @classmethod
-    async def from_url(cls, url, *, loop=None, stream=True, ctx=None):
+    async def from_url(cls, url, *, loop=None, stream=True, ctx=None, source_type='youtube', ytdl_instance=None):
         loop = loop or asyncio.get_event_loop()
         
-        # Determine if we need clean options (e.g., for Bilibili) to avoid YouTube conflicts
-        is_bili = "bilibili.com" in url or "b23.tv" in url
-        
-        if is_bili:
-            opts = ytdl_format_options.copy()
-            opts.pop('extractor_args', None)
-            # Ensure Bilibili has proper headers if not already set
-            if 'http_headers' not in opts:
-                opts['http_headers'] = {
-                    'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-                    'Referer': 'https://www.bilibili.com/',
-                }
-            current_ytdl = yt_dlp.YoutubeDL(opts)
-        else:
-            current_ytdl = ytdl
+        if not ytdl_instance:
+             # Fallback if no instance provided, though Music cog should provide it
+             ytdl_instance = yt_dlp.YoutubeDL(ytdl_format_options)
 
         # Extract info. If stream=False, this might download the file if not present.
         try:
-            data = await loop.run_in_executor(None, lambda: current_ytdl.extract_info(url, download=not stream))
+            data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(url, download=not stream))
         except Exception as e:
             err_msg = str(e).strip().split('\n')[-1]
             print(f"ERROR: Failed to extract info for {url}: {err_msg}")
-            
-            # Specific hint for "Requested format is not available"
-            if "Requested format is not available" in err_msg:
-                err_msg += " (Server IP might be throttled or mobile client bypass failed)"
-                
-            if ctx:
-                music_cog = ctx.bot.get_cog('Music')
-                if music_cog:
-                    await music_cog.safe_send(ctx, f"YT-DLP ERROR: {err_msg}")
             raise e
 
         if 'entries' in data:
@@ -195,11 +164,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if 'title' not in data:
             data['title'] = "Unknown Title"
         
-        # Check if the extracted data is sufficient for playback
-        if 'url' not in data and 'webpage_url' not in data and 'id' not in data:
-             raise Exception("The extracted data is missing critical fields (url, webpage_url, or id) for playback.")
-
-        filename = data.get('url') if stream else ytdl.prepare_filename(data)
+        filename = data.get('url') if stream else ytdl_instance.prepare_filename(data)
         if not filename:
              raise Exception("The extracted data does not contain a valid URL or filename for playback.")
         
@@ -207,36 +172,25 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         if stream:
             _ffmpeg_options = ffmpeg_streaming_options.copy()
-            
-            # Select a random User-Agent for this session
             current_ua = random.choice(USER_AGENTS)
             
             # Inject headers for streaming to avoid 403
-            if 'http_headers' in data:
-                headers = data['http_headers']
-                # Override or add User-Agent
-                headers['User-Agent'] = current_ua
-                
-                header_items = []
-                for key, value in headers.items():
-                    header_items.append(f"{key}: {value}")
-                
-                header_str = "\r\n".join(header_items) + "\r\n"
-                
-                if 'before_options' in _ffmpeg_options:
-                     _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-                else:
-                     _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
-
-                # Also add -user_agent flag explicitly for protocols that use it directly
-                _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
-                
-                # Bilibili specific: Needs Referer
-                if "bilibili.com" in url or "b23.tv" in url:
-                    _ffmpeg_options['before_options'] += ' -referer "https://www.bilibili.com/"'
+            headers = data.get('http_headers', {})
+            headers['User-Agent'] = current_ua
+            
+            header_items = [f"{key}: {value}" for key, value in headers.items()]
+            header_str = "\r\n".join(header_items) + "\r\n"
+            
+            if 'before_options' in _ffmpeg_options:
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
             else:
-                # If no headers from yt-dlp, just inject our UA
-                _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
+                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
+
+            _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
+            
+            # Bilibili specific: Needs Referer
+            if source_type == 'bilibili':
+                _ffmpeg_options['before_options'] += ' -referer "https://www.bilibili.com/"'
         else:
             _ffmpeg_options = ffmpeg_options.copy()
 
@@ -246,9 +200,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
         super().cleanup()
 
     @classmethod
-    async def search_source(cls, query, *, loop=None, stream=True):
+    async def search_source(cls, query, *, loop=None, ytdl_instance=None):
         loop = loop or asyncio.get_event_loop()
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch5:{query}", download=False))
+        if not ytdl_instance:
+            return []
+        data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(f"ytsearch5:{query}", download=False))
         
         if 'entries' not in data:
             return []
@@ -262,51 +218,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 'duration': entry.get('duration', 0)
             })
         return results
-
-    @classmethod
-    async def bili_search_source(cls, query, *, loop=None):
-        """Robust direct search on Bilibili."""
-        loop = loop or asyncio.get_event_loop()
-        
-        import urllib.parse
-        encoded_query = urllib.parse.quote(query)
-        search_url = f"https://search.bilibili.com/all?keyword={encoded_query}"
-
-        # Bilibili clean options: No YouTube-specific args
-        opts = ytdl_format_options.copy()
-        opts.pop('extractor_args', None)
-        opts['http_headers'] = {
-            'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-            'Referer': 'https://www.bilibili.com/',
-        }
-        
-        search_ytdl = yt_dlp.YoutubeDL(opts)
-        
-        try:
-            data = await loop.run_in_executor(None, lambda: search_ytdl.extract_info(search_url, download=False))
-            
-            if 'entries' not in data or not data['entries']:
-                return None
-            
-            # Find the first entry that is actually a Bilibili video
-            entry = None
-            for e in data['entries']:
-                url = e.get('webpage_url', e.get('url'))
-                if url and ("bilibili.com/video/" in url or "b23.tv" in url):
-                    entry = e
-                    break
-            
-            if not entry:
-                return None
-
-            return {
-                'title': entry.get('title'),
-                'url': entry.get('webpage_url', entry.get('url')),
-                'duration': entry.get('duration', 0)
-            }
-        except Exception as e:
-            print(f"ERROR: Bilibili direct search failed for query: {query} - {e}")
-            return None
 
 class SearchSelect(discord.ui.Select):
     def __init__(self, ctx, results, music_cog):
@@ -409,8 +320,25 @@ class PlayerView(discord.ui.View):
 class Music(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        global ytdl
-        ytdl = yt_dlp.YoutubeDL(ytdl_format_options)
+        
+        # YouTube specific options
+        yt_opts = ytdl_format_options.copy()
+        yt_opts.update({
+            'cookiefile': cookie_path,
+            'extractor_args': {'youtube': {'player_client': ['tv', 'ios']}},
+        })
+        self.ytdl_yt = yt_dlp.YoutubeDL(yt_opts)
+
+        # Bilibili specific options
+        bili_opts = ytdl_format_options.copy()
+        bili_opts.update({
+            'http_headers': {
+                'Referer': 'https://www.bilibili.com/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+            }
+        })
+        self.ytdl_bili = yt_dlp.YoutubeDL(bili_opts)
+
         self.queue = deque()
         self.current_song = None
         self.current_source = None
@@ -419,7 +347,7 @@ class Music(commands.Cog):
         self.is_shuffling = False
         self.autoplay = False
         self.playlist_dir = 'data/playlists'
-        self.bili_retries = set()     # Track songs failing YouTube and retrying on Bilibili
+        self.bili_retries = set()     # Track clean titles that were already fallbacked
         
         if not os.path.exists(self.playlist_dir):
             os.makedirs(self.playlist_dir)
@@ -530,52 +458,39 @@ class Music(commands.Cog):
             print(f"ERROR: Could not send player message: {e}")
 
     async def trigger_bili_fallback(self, ctx, query, requester_id):
-        """Robust fallback for YouTube failures."""
+        """Fallback to Bilibili for YouTube failures."""
         if query in self.bili_retries:
-            self.bili_retries.remove(query)
-            await self.play_next(ctx)
-            return
+            return await self.play_next(ctx)
 
         self.bili_retries.add(query)
         
         search_query = query
-        original_title = None
-
         if query.startswith('http'):
             try:
-                # Try to get info without full processing to extract title
-                info = await self.bot.loop.run_in_executor(None, lambda: ytdl.extract_info(query, download=False, process=False))
-                original_title = info.get('title')
+                # Try to get info to extract title
+                info = await self.bot.loop.run_in_executor(None, lambda: self.ytdl_yt.extract_info(query, download=False, process=False))
+                search_query = info.get('title', query)
             except:
-                pass
-
-            if not original_title:
                 import re
                 search_query = re.sub(r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/|bilibili\.com/video/)', '', query)
                 search_query = re.sub(r'[^\w\s]', ' ', search_query)
                 search_query = ' '.join(search_query.split()).strip()
-            else:
-                search_query = original_title
         
-        if not search_query:
-            search_query = query
-
-        await self.safe_send(ctx, "FALLBACK: YouTube blocked. Searching Bilibili directly...")
+        await self.safe_send(ctx, f"FALLBACK: {search_query}")
         
         try:
-            bili_res = await YTDLSource.bili_search_source(search_query, loop=self.bot.loop)
+            # Use bilisearch1: as requested
+            data = await self.bot.loop.run_in_executor(None, lambda: self.ytdl_bili.extract_info(f"bilisearch1:{search_query}", download=False))
             
-            if bili_res:
-                await self.safe_send(ctx, f"SUCCESS: Found fallback: {bili_res['title']}")
-                self.queue.appendleft((bili_res['url'], requester_id))
+            if 'entries' in data and data['entries']:
+                entry = data['entries'][0]
+                url = entry.get('webpage_url', entry.get('url'))
+                # Prepend to queue for immediate playback
+                self.queue.appendleft((url, requester_id))
             else:
-                await self.safe_send(ctx, f"ERROR: No results found for: {search_query}")
-                if query in self.bili_retries:
-                    self.bili_retries.remove(query)
+                await self.safe_send(ctx, "ERROR: No results.")
         except Exception:
-            await self.safe_send(ctx, "ERROR: Fallback search failed.")
-            if query in self.bili_retries:
-                self.bili_retries.remove(query)
+            await self.safe_send(ctx, "ERROR: Search failed.")
         
         await self.play_next(ctx)
 
@@ -587,15 +502,19 @@ class Music(commands.Cog):
             query, requester_id = self.queue.popleft()
             self.current_song = (query, requester_id)
             
-            # Explicitly separate Bilibili vs YouTube/Search
             is_bili = "bilibili.com" in query or "b23.tv" in query
+            is_yt_url = "youtube.com" in query or "youtu.be" in query
             
+            # Determine source_type and ytdl_instance
             if is_bili:
-                await self.safe_send(ctx, f"INFO: Processing Bilibili link: {query}")
+                source_type = 'bilibili'
+                ytdl_inst = self.ytdl_bili
                 search_query = query
             else:
-                # Prepend ytsearch: if not a URL to ensure yt-dlp treats it as a search
-                search_query = query if query.startswith('http') else f"ytsearch:{query}"
+                source_type = 'youtube'
+                ytdl_inst = self.ytdl_yt
+                # If it's not a URL, it's a search term
+                search_query = query if is_yt_url else f"ytsearch:{query}"
 
             try:
                 if not ctx.voice_client:
@@ -604,64 +523,44 @@ class Music(commands.Cog):
                     if requester and requester.voice:
                          await requester.voice.channel.connect(self_deaf=True)
                     else:
-                         await self.safe_send(ctx, f"SKIP: {query} (Cannot reconnect)")
                          self.queue.clear()
                          return
 
-                source = await YTDLSource.from_url(search_query, loop=self.bot.loop, stream=True, ctx=ctx)
+                source = await YTDLSource.from_url(search_query, loop=self.bot.loop, stream=True, ctx=ctx, source_type=source_type, ytdl_instance=ytdl_inst)
                 
                 def after_playing(error):
                     if error:
-                        # Print error to console
-                        err_str = str(error)
-                        print(f"ERROR: Playback error for {query}: {err_str}")
-                        
+                        print(f"ERROR: {query}: {error}")
                         async def handle_error():
-                            # Re-check is_bili here to prevent fallback loops
-                            is_now_bili = "bilibili.com" in query or "b23.tv" in query
-                            if not is_now_bili:
-                                 # Fallback to Bilibili for YouTube failures
+                            if source_type == 'youtube':
                                  await self.trigger_bili_fallback(ctx, query, requester_id)
                             else:
-                                 # Bilibili failed, just move on to prevent infinite loops
-                                 print(f"DEBUG: Bilibili playback failed, skipping fallback: {query}")
+                                 # Bilibili failed, no fallback, move next
                                  if query in self.bili_retries:
                                      self.bili_retries.remove(query)
-                                 await asyncio.sleep(1)
                                  await self.play_next(ctx)
-                        
                         self.bot.loop.create_task(handle_error())
                         return
                     
-                    # If successful, remove from retries and move on
                     if query in self.bili_retries:
                         self.bili_retries.remove(query)
-                        
                     self.bot.loop.create_task(self.play_next(ctx))
 
-                if ctx.voice_client:
-                    ctx.voice_client.play(source, after=after_playing)
-                    await self.update_player(ctx, source)
-                else:
-                    await self.safe_send(ctx, "ERROR: Not connected to voice.")
+                ctx.voice_client.play(source, after=after_playing)
+                await self.update_player(ctx, source)
             
             except Exception as e:
-                err_str = str(e)
-                print(f"ERROR: Extraction failed for {query}: {err_str}")
-                
-                # If YouTube extraction fails, immediately trigger Bilibili fallback
-                if not is_bili:
+                print(f"ERROR: {query}: {e}")
+                if source_type == 'youtube':
                     await self.trigger_bili_fallback(ctx, query, requester_id)
                 else:
-                    # Bilibili also failed or was the original source, just move on
-                    await self.safe_send(ctx, f"ERROR: Bilibili failed for {query}")
                     if query in self.bili_retries:
                         self.bili_retries.remove(query)
-                    await asyncio.sleep(1)
                     await self.play_next(ctx)
         else:
             self.current_song = None
-            await self.safe_send(ctx, "INFO: Queue finished.")
+            self.bili_retries.clear() # Clear all retries when queue is done
+            await self.safe_send(ctx, "INFO: Queue empty.")
 
     async def ensure_voice(self, ctx):
         if not ctx.voice_client:
@@ -764,7 +663,7 @@ class Music(commands.Cog):
 
         msg = await ctx.send(f"SEARCHING: **{query}**...")
         try:
-            results = await YTDLSource.search_source(query, loop=self.bot.loop)
+            results = await YTDLSource.search_source(query, loop=self.bot.loop, ytdl_instance=self.ytdl_yt)
         except Exception as e:
              return await msg.edit(content=f"ERROR: Error searching: {e}")
         
@@ -837,11 +736,11 @@ class Music(commands.Cog):
             msg = await ctx.send("INFO: Processing YouTube playlist...")
             try:
                 loop = self.bot.loop or asyncio.get_event_loop()
-                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(song_query, download=False, process_info=False)) 
+                data = await loop.run_in_executor(None, lambda: self.ytdl_yt.extract_info(song_query, download=False, process_info=False)) 
 
                 if 'entries' in data:
                     for entry in data['entries']:
-                        song_info = await loop.run_in_executor(None, lambda: ytdl.extract_info(entry['url'], download=False))
+                        song_info = await loop.run_in_executor(None, lambda: self.ytdl_yt.extract_info(entry['url'], download=False))
                         tracks.append(song_info.get('webpage_url', song_info.get('url', song_info.get('title'))))
                         added_count += 1
                 await msg.edit(content=f"SUCCESS: Added {added_count} songs from YouTube playlist to **{name}**.")
