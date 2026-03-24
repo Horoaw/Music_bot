@@ -87,7 +87,7 @@ if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
 
 ytdl_format_options = {
-    'format': 'ba/b',
+    'format': 'bestaudio/best',
     'outtmpl': os.path.join(cache_dir, '%(id)s.%(ext)s'),
     'restrictfilenames': True,
     'noplaylist': True,
@@ -102,8 +102,10 @@ ytdl_format_options = {
     'cookiefile': cookie_path,
     'cachedir': cache_dir,
     'youtube_include_dash_manifest': True,
+    'youtube_include_hls_manifest': True,
+    'check_formats': False,
     'http_chunk_size': 10485760,
-    'extractor_args': {'youtube': {'player_client': ['android', 'ios']}},
+    'extractor_args': {'youtube': {'player_client': ['android', 'ios', 'web_embedded', 'tv'], 'skip': ['webpage']}},
 }
 
 ffmpeg_options = {
@@ -113,7 +115,7 @@ ffmpeg_options = {
 # Separate options for streaming vs downloading
 ffmpeg_streaming_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_on_network_error 1 -reconnect_at_eof 1 -analyzeduration 0 -probesize 32'
 }
 
 # Pool of User-Agents to rotate
@@ -247,9 +249,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         # Custom headers for Bilibili
         bili_opts = ytdl_format_options.copy()
-        current_ua = random.choice(USER_AGENTS)
+        # Modern Chrome User-Agent for Bilibili
+        specific_ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
         bili_opts['http_headers'] = {
-            'User-Agent': current_ua,
+            'User-Agent': specific_ua,
             'Referer': 'https://www.bilibili.com/',
         }
         
@@ -510,7 +513,8 @@ class Music(commands.Cog):
             return
 
         self.bili_retries.add(query)
-        await self.safe_send(ctx, f"FALLBACK: YouTube failed. Searching Bilibili for: {query}")
+        await self.safe_send(ctx, f"FALLBACK: YouTube failed. Waiting 2s before searching Bilibili for: {query}")
+        await asyncio.sleep(2) # Avoid rate limiting
         
         try:
             bili_res = await YTDLSource.bili_search_source(query, loop=self.bot.loop)
@@ -984,6 +988,29 @@ class Music(commands.Cog):
         query = f"{genre} radio live"
         await self.play(ctx, query=query)
 
+    @commands.hybrid_command(name='status', description="Reports the current status of the bot's environment.")
+    async def status(self, ctx: commands.Context):
+        import yt_dlp
+        import platform
+        
+        ytdlp_version = yt_dlp.version.__version__
+        ffmpeg_path = ffmpeg_executable
+        python_version = platform.python_version()
+        
+        cookie_info = "Not found"
+        if os.path.exists(cookie_path):
+            size = os.path.getsize(cookie_path)
+            cookie_info = f"Exists ({size} bytes)"
+            
+        report = (
+            f"**ENVIRONMENT STATUS**\n"
+            f"YT-DLP: `{ytdlp_version}`\n"
+            f"FFmpeg: `{ffmpeg_path}`\n"
+            f"Python: `{python_version}`\n"
+            f"Cookies: `{cookie_info}`"
+        )
+        await ctx.send(report)
+
     @commands.hybrid_command(name='leave', description="Disconnects the bot from the voice channel.")
     async def leave(self, ctx: commands.Context):
         if ctx.voice_client:
@@ -1046,6 +1073,11 @@ class Music(commands.Cog):
         embed.add_field(
             name="**!leave**",
             value="Disconnects the bot from the voice channel.",
+            inline=False
+        )
+        embed.add_field(
+            name="**!status**",
+            value="Shows environment status (yt-dlp, ffmpeg, cookies).",
             inline=False
         )
 
