@@ -101,6 +101,7 @@ ytdl_format_options = {
     'force_ipv4': True,
     'cookiefile': cookie_path,
     'cachedir': cache_dir,
+    'youtube_include_dash_manifest': False,
 }
 
 ffmpeg_options = {
@@ -159,6 +160,14 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
         if not data:
             raise Exception("Failed to extract any data from the provided URL/query.")
+
+        # Ensure we have a title and a playable URL/id
+        if 'title' not in data:
+            data['title'] = "Unknown Title"
+        
+        # Check if the extracted data is sufficient for playback
+        if 'url' not in data and 'webpage_url' not in data and 'id' not in data:
+             raise Exception("The extracted data is missing critical fields (url, webpage_url, or id) for playback.")
 
         filename = data.get('url') if stream else ytdl.prepare_filename(data)
         if not filename:
@@ -226,10 +235,15 @@ class YTDLSource(discord.PCMVolumeTransformer):
 
     @classmethod
     async def bili_search_source(cls, query, *, loop=None):
-        """Specifically search Bilibili for fallback."""
+        """Specifically search Bilibili for fallback using YouTube search or direct bilisearch."""
         loop = loop or asyncio.get_event_loop()
-        # Use bilisearch prefix for yt-dlp
-        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"bilisearch1:{query}", download=False))
+        
+        # Try ytsearch for Bilibili first as it's often more reliable than the native bilisearch extractor
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"ytsearch1:bilibili {query}", download=False))
+        
+        if 'entries' not in data or not data['entries']:
+            # Fallback to direct bilisearch if ytsearch returns nothing
+            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(f"bilisearch1:{query}", download=False))
         
         if 'entries' not in data or not data['entries']:
             return None
@@ -474,6 +488,11 @@ class Music(commands.Cog):
         
         try:
             bili_res = await YTDLSource.bili_search_source(query, loop=self.bot.loop)
+            
+            # If nothing found, try a broader search
+            if not bili_res:
+                 bili_res = await YTDLSource.bili_search_source(f"bilibili {query}", loop=self.bot.loop)
+
             if bili_res:
                 await self.safe_send(ctx, f"SUCCESS: Found on Bilibili: {bili_res['title']}")
                 self.queue.appendleft((bili_res['url'], requester_id))
