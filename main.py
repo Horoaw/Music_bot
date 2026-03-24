@@ -56,13 +56,13 @@ class MusicBot(commands.Bot):
     @commands.command(name='sync', description="Syncs slash commands.")
     @commands.has_permissions(administrator=True)
     async def sync_commands(self, ctx: commands.Context, spec: str = "~"):
-        await ctx.send(f"🔄 Processing sync request with spec: `{spec}`...")
+        await ctx.send(f"INFO: Processing sync request with spec: `{spec}`...")
         print(f"Sync triggered by {ctx.author} (Spec: {spec})")
         
         try:
             if spec == "~": # Sync to current guild
                 if not ctx.guild:
-                    return await ctx.send("❌ Can only sync to a guild.")
+                    return await ctx.send("ERROR: Can only sync to a guild.")
                 
                 # Clear existing guild commands first to ensure a clean slate
                 self.tree.clear_commands(guild=ctx.guild)
@@ -72,24 +72,24 @@ class MusicBot(commands.Bot):
                 
                 # Sync
                 synced = await self.tree.sync(guild=ctx.guild)
-                await ctx.send(f"✅ Successfully synced {len(synced)} commands to this server (Instant).")
+                await ctx.send(f"SUCCESS: Successfully synced {len(synced)} commands to this server (Instant).")
                 print(f"Synced {len(synced)} commands to guild {ctx.guild.id}.")
                 
             elif spec == "global": # Sync globally
                 synced = await self.tree.sync()
-                await ctx.send(f"✅ Synced {len(synced)} commands globally (May take 1 hour).")
+                await ctx.send(f"SUCCESS: Synced {len(synced)} commands globally (May take 1 hour).")
                 
             elif spec == "^": # Clear
                 self.tree.clear_commands(guild=ctx.guild)
                 await self.tree.sync(guild=ctx.guild)
-                await ctx.send("✅ Cleared guild commands.")
+                await ctx.send("SUCCESS: Cleared guild commands.")
             
             else:
-                await ctx.send("❓ Unknown spec. Use `~` (Guild) or `global`.")
+                await ctx.send("INFO: Unknown spec. Use `~` (Guild) or `global`.")
 
         except Exception as e:
             print(f"Sync Error: {e}")
-            await ctx.send(f"❌ Sync failed: {e}")
+            await ctx.send(f"ERROR: Sync failed: {e}")
 
 async def main():
     bot = MusicBot()

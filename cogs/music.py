@@ -13,6 +13,7 @@ import aiohttp
 import sys
 import subprocess
 import traceback
+import re
 
 # Suppress noise from youtube_dl and fix bug with generic extractor
 yt_dlp.utils.bug_reports_message = lambda *args, **kwargs: ''
@@ -324,17 +325,21 @@ class Music(commands.Cog):
         # YouTube specific options
         yt_opts = ytdl_format_options.copy()
         yt_opts.update({
+            'format': 'ba',
+            'format_sort': ['abr', 'ext:m4a'],
             'cookiefile': cookie_path,
-            'extractor_args': {'youtube': {'player_client': ['tv', 'ios']}},
+            'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
+            'geo_bypass': True,
         })
         self.ytdl_yt = yt_dlp.YoutubeDL(yt_opts)
 
         # Bilibili specific options
         bili_opts = ytdl_format_options.copy()
         bili_opts.update({
+            'format': 'bestaudio/best',
             'http_headers': {
                 'Referer': 'https://www.bilibili.com/',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
         })
         self.ytdl_bili = yt_dlp.YoutubeDL(bili_opts)
@@ -471,16 +476,32 @@ class Music(commands.Cog):
                 info = await self.bot.loop.run_in_executor(None, lambda: self.ytdl_yt.extract_info(query, download=False, process=False))
                 search_query = info.get('title', query)
             except:
-                import re
                 search_query = re.sub(r'https?://(www\.)?(youtube\.com/watch\?v=|youtu\.be/|bilibili\.com/video/)', '', query)
                 search_query = re.sub(r'[^\w\s]', ' ', search_query)
                 search_query = ' '.join(search_query.split()).strip()
+
+        # Clean search query by removing common junk
+        clean_query = search_query
+        junk_patterns = [
+            r"\(Official Video\)", r"\[Official Video\]", r"Official Video",
+            r"\(Official Audio\)", r"\[Official Audio\]", r"Official Audio",
+            r"\(MV\)", r"\[MV\]", r"\bMV\b",
+            r"\(HD\)", r"\[HD\]", r"\bHD\b",
+            r"\(1080p\)", r"\[1080p\]", r"1080p",
+            r"\(4K\)", r"\[4K\]", r"4K",
+            r"\(Lyrics\)", r"\[Lyrics\]", r"Lyrics"
+        ]
+        for pattern in junk_patterns:
+            clean_query = re.sub(pattern, "", clean_query, flags=re.IGNORECASE)
         
-        await self.safe_send(ctx, f"FALLBACK: {search_query}")
+        clean_query = ' '.join(clean_query.split()).strip()
+        search_query_bili = f"{clean_query} music"
+        
+        await self.safe_send(ctx, f"FALLBACK: YouTube restricted this content. Searching Bilibili for: {clean_query}...")
         
         try:
             # Use bilisearch1: as requested
-            data = await self.bot.loop.run_in_executor(None, lambda: self.ytdl_bili.extract_info(f"bilisearch1:{search_query}", download=False))
+            data = await self.bot.loop.run_in_executor(None, lambda: self.ytdl_bili.extract_info(f"bilisearch1:{search_query_bili}", download=False))
             
             if 'entries' in data and data['entries']:
                 entry = data['entries'][0]
@@ -488,9 +509,9 @@ class Music(commands.Cog):
                 # Prepend to queue for immediate playback
                 self.queue.appendleft((url, requester_id))
             else:
-                await self.safe_send(ctx, "ERROR: No results.")
+                await self.safe_send(ctx, "ERROR: No results found on Bilibili.")
         except Exception:
-            await self.safe_send(ctx, "ERROR: Search failed.")
+            await self.safe_send(ctx, "ERROR: Bilibili search failed.")
         
         await self.play_next(ctx)
 
