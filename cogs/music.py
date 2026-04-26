@@ -163,15 +163,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 raise Exception("No search results found.")
             data = data['entries'][0]
 
-        # RE-EXTRACT IF NECESSARY: If we don't have formats, we MUST get them.
-        if 'formats' not in data:
-            search_url = data.get('webpage_url') or data.get('url')
-            if search_url:
-                print(f"DEBUG: Missing formats, re-extracting from: {search_url}")
+        # RE-EXTRACT IF NECESSARY
+        # If the initial URL is a webpage or we don't have enough format data, force deep extraction
+        initial_url = data.get('url', '')
+        is_webpage = "youtube.com" in initial_url or "youtu.be" in initial_url
+        has_no_formats = 'formats' not in data or len(data.get('formats', [])) < 5
+        
+        if is_webpage or has_no_formats:
+            search_url = data.get('webpage_url') or initial_url
+            if search_url and ("youtube.com" in search_url or "youtu.be" in search_url):
+                print(f"DEBUG: Data is shallow, performing deep extraction for: {search_url}")
                 data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(search_url, download=not stream))
 
-        if not data:
-            raise Exception("Failed to extract any data.")
+        if not data or ('formats' not in data and stream):
+             raise Exception("No playable formats found. This might be due to YouTube signature challenges or IP blocking.")
 
         # Ensure we have a title
         if 'title' not in data:
@@ -214,7 +219,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
              raise Exception("Failed to resolve a direct stream URL. yt-dlp might be being throttled or blocked.")
         
         print(f"DEBUG: Playing Title: {data.get('title')}")
-        print(f"DEBUG: Final Stream URL: {filename[:100]}...")
+        print(f"DEBUG: Final Stream URL: {filename}")
         
         _ffmpeg_options = {}
         
@@ -371,10 +376,11 @@ class Music(commands.Cog):
         yt_opts.update({
             'format': 'bestaudio/best',
             'cookiefile': cookie_path,
-            # Aggressive client rotation to avoid 403
+            # Force Node.js for signature solving
+            'javascript_executor': 'node',
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['ios', 'android', 'mweb'],
+                    'player_client': ['tv', 'ios', 'android', 'mweb'],
                     'player_skip': ['webpage', 'configs'],
                 }
             },
