@@ -104,6 +104,9 @@ ytdl_format_options = {
     'ignore_no_formats_error': True,
     'sleep_interval': 1,
     'max_sleep_interval': 3,
+    'socket_timeout': 30,
+    'retries': 10,
+    'extract_flat': 'in_playlist',
 }
 
 ffmpeg_options = {
@@ -113,7 +116,7 @@ ffmpeg_options = {
 # Separate options for streaming vs downloading
 ffmpeg_streaming_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 -reconnect_on_network_error 1 -reconnect_at_eof 1 -analyzeduration 0 -probesize 32'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1 -analyzeduration 0 -probesize 32'
 }
 
 # Pool of User-Agents to rotate
@@ -194,7 +197,12 @@ class YTDLSource(discord.PCMVolumeTransformer):
             
             # Inject headers for streaming to avoid 403
             headers = data.get('http_headers', {})
+            # Only override User-Agent if not already specific or if we want rotation
             headers['User-Agent'] = current_ua
+            
+            # Bilibili specific: Needs Referer
+            if source_type == 'bilibili':
+                headers['Referer'] = 'https://www.bilibili.com/'
             
             header_items = [f"{key}: {value}" for key, value in headers.items()]
             header_str = "\r\n".join(header_items) + "\r\n"
@@ -205,10 +213,6 @@ class YTDLSource(discord.PCMVolumeTransformer):
                  _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
 
             _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
-            
-            # Bilibili specific: Needs Referer
-            if source_type == 'bilibili':
-                _ffmpeg_options['before_options'] += ' -referer "https://www.bilibili.com/"'
         else:
             _ffmpeg_options = ffmpeg_options.copy()
 
@@ -344,8 +348,16 @@ class Music(commands.Cog):
         yt_opts.update({
             'format': 'bestaudio/best',
             'cookiefile': cookie_path,
-            'extractor_args': {'youtube': {'player_client': ['ios', 'android', 'mweb']}},
+            # Aggressive client rotation to avoid 403
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android', 'ios', 'mweb', 'web', 'tv'],
+                    'player_skip': ['webpage', 'configs'],
+                }
+            },
             'geo_bypass': True,
+            'nocheckcertificate': True,
+            'prefer_insecure': True, # Sometimes helps with 403/throttling on some networks
         })
         self.ytdl_yt = yt_dlp.YoutubeDL(yt_opts)
 
@@ -959,10 +971,23 @@ class Music(commands.Cog):
         query = f"{genre} radio live"
         await self.play(ctx, query=query)
 
+    @commands.hybrid_command(name='volume', description="Changes the player's volume (0-100).")
+    @app_commands.describe(volume="Volume level from 0 to 100.")
+    async def volume(self, ctx: commands.Context, volume: int):
+        if not ctx.voice_client:
+            return await ctx.send("Not connected to a voice channel.")
+
+        if 0 <= volume <= 100:
+            ctx.voice_client.source.volume = volume / 100
+            await ctx.send(f"Volume changed to **{volume}%**")
+        else:
+            await ctx.send("Please enter a volume between 0 and 100.")
+
     @commands.hybrid_command(name='status', description="Reports the current status of the bot's environment.")
     async def status(self, ctx: commands.Context):
         import yt_dlp
         import platform
+        import shutil
         
         ytdlp_version = yt_dlp.version.__version__
         ffmpeg_path = ffmpeg_executable
@@ -973,14 +998,55 @@ class Music(commands.Cog):
             size = os.path.getsize(cookie_path)
             cookie_info = f"Exists ({size} bytes)"
             
+        node_path = shutil.which("node")
+        node_version = "N/A"
+        if node_path:
+            try:
+                node_version = subprocess.check_output([node_path, "--version"], text=True).strip()
+            except:
+                node_version = "Error"
+
+        # Check cache size
+        cache_size_bytes = 0
+        for f in os.listdir(cache_dir):
+            cache_size_bytes += os.path.getsize(os.path.join(cache_dir, f))
+        cache_size_mb = cache_size_bytes / (1024 * 1024)
+
         report = (
             f"**ENVIRONMENT STATUS**\n"
             f"YT-DLP: `{ytdlp_version}`\n"
             f"FFmpeg: `{ffmpeg_path}`\n"
+            f"Node.js: `{node_version}`\n"
             f"Python: `{python_version}`\n"
-            f"Cookies: `{cookie_info}`"
+            f"Cookies: `{cookie_info}`\n"
+            f"Cache Size: `{cache_size_mb:.2f} MB`"
         )
         await ctx.send(report)
+
+    @commands.hybrid_command(name='update_ytdlp', description="Updates yt-dlp to the latest version.")
+    @commands.has_permissions(administrator=True)
+    async def update_ytdlp(self, ctx: commands.Context):
+        await ctx.defer()
+        try:
+            # Run pip upgrade
+            process = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "pip", "install", "-U", "yt-dlp",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                # Re-import or check version
+                import importlib
+                import yt_dlp
+                importlib.reload(yt_dlp)
+                new_version = yt_dlp.version.__version__
+                await ctx.send(f"SUCCESS: yt-dlp updated to `{new_version}`. Please restart the bot to ensure all changes take effect.")
+            else:
+                await ctx.send(f"ERROR: Update failed: {stderr.decode()}")
+        except Exception as e:
+            await ctx.send(f"ERROR: An exception occurred: {e}")
 
     @commands.hybrid_command(name='leave', description="Disconnects the bot from the voice channel.")
     async def leave(self, ctx: commands.Context):
@@ -1042,13 +1108,23 @@ class Music(commands.Cog):
             inline=False
         )
         embed.add_field(
-            name="**!leave**",
-            value="Disconnects the bot from the voice channel.",
+            name="**!volume <0-100>**",
+            value="Changes the player's volume.",
             inline=False
         )
         embed.add_field(
             name="**!status**",
-            value="Shows environment status (yt-dlp, ffmpeg, cookies).",
+            value="Shows environment status (yt-dlp, ffmpeg, node, cache).",
+            inline=False
+        )
+        embed.add_field(
+            name="**!update_ytdlp**",
+            value="Admin only: Updates yt-dlp to the latest version.",
+            inline=False
+        )
+        embed.add_field(
+            name="**!leave**",
+            value="Disconnects the bot from the voice channel.",
             inline=False
         )
 
