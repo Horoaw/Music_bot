@@ -186,7 +186,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
         filename = None
         if 'formats' in data:
             try:
-                # Filter for REAL audio streams (must have acodec, must not have vcodec)
+                # 1. Primary: Pure Audio (no video codec)
                 audio_formats = [
                     f for f in data['formats'] 
                     if f.get('vcodec') == 'none' 
@@ -195,10 +195,21 @@ class YTDLSource(discord.PCMVolumeTransformer):
                     and f.get('ext') != 'mhtml'
                 ]
                 
+                # 2. Fallback: Any format that HAS audio (progressive streams)
+                if not audio_formats:
+                    audio_formats = [
+                        f for f in data['formats'] 
+                        if f.get('acodec') != 'none' 
+                        and f.get('url')
+                        and f.get('ext') != 'mhtml'
+                    ]
+                    if audio_formats:
+                         print("DEBUG: Using progressive format as fallback.")
+                
                 if audio_formats:
                     # Sort by quality (abr)
                     audio_formats.sort(key=lambda x: x.get('abr', 0) or 0, reverse=True)
-                    # Prefer googlevideo URLs if available
+                    # Prefer googlevideo URLs
                     gv_formats = [f for f in audio_formats if ".googlevideo.com" in f.get('url', '')]
                     if gv_formats:
                         filename = gv_formats[0]['url']
@@ -207,42 +218,37 @@ class YTDLSource(discord.PCMVolumeTransformer):
             except Exception as e:
                 print(f"DEBUG: Format sorting failed: {e}")
 
-        # Fallback to top-level url if still nothing found in formats
+        # Fallback to top-level url
         if not filename:
             filename = data.get('url')
 
-        if not stream:
-            filename = ytdl_instance.prepare_filename(data)
-
-        if not filename or (stream and ("youtube.com" in filename or "youtu.be" in filename)):
-             # If it's still a YouTube link and we are streaming, something is wrong
-             raise Exception("Failed to resolve a direct stream URL. yt-dlp might be being throttled or blocked.")
+        if not filename:
+             raise Exception("Failed to resolve a direct stream URL.")
         
         print(f"DEBUG: Playing Title: {data.get('title')}")
-        print(f"DEBUG: Final Stream URL: {filename}")
+        print(f"DEBUG: Final Stream URL: {filename[:100]}...")
         
         _ffmpeg_options = {}
         
         if stream:
             _ffmpeg_options = ffmpeg_streaming_options.copy()
             
-            # Use the EXACT headers that yt-dlp used to avoid 403
             headers = data.get('http_headers', {})
-            
-            # Ensure User-Agent exists
-            if not headers.get('User-Agent'):
-                headers['User-Agent'] = random.choice(USER_AGENTS)
+            ua = headers.get('User-Agent') or random.choice(USER_AGENTS)
             
             if source_type == 'bilibili':
                 headers['Referer'] = 'https://www.bilibili.com/'
             
-            header_str = "\r\n".join([f"{k}: {v}" for k, v in headers.items()]) + "\r\n"
+            # Filter and join headers carefully
+            header_items = []
+            for k, v in headers.items():
+                if k.lower() != 'user-agent':
+                    header_items.append(f"{k}: {v}")
             
-            # Use standard header injection
-            _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+            header_str = "\r\n".join(header_items) + "\r\n"
             
-            # CRITICAL: Pipe stderr to the main process terminal so we can SEE the error
-            import subprocess
+            # Set User-Agent and Headers separately for better ffmpeg compatibility
+            _ffmpeg_options['before_options'] = f'-user_agent "{ua}" -headers "{header_str}" ' + _ffmpeg_options['before_options']
             _ffmpeg_options['stderr'] = None
         else:
             _ffmpeg_options = ffmpeg_options.copy()
