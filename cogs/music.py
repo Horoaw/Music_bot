@@ -164,6 +164,11 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if not data:
             raise Exception("Failed to extract any data from the provided URL/query.")
 
+        # SECONDARY EXTRACTION: If formats are missing, we need to process the URL again to get stream URLs
+        if 'formats' not in data and 'webpage_url' in data:
+            print(f"DEBUG: Data is flat, performing secondary extraction for: {data['webpage_url']}")
+            data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(data['webpage_url'], download=not stream))
+
         # Ensure we have a title
         if 'title' not in data:
             data['title'] = "Unknown Title"
