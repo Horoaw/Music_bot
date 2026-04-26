@@ -147,8 +147,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
              # Fallback if no instance provided, though Music cog should provide it
              ytdl_instance = yt_dlp.YoutubeDL(ytdl_format_options)
 
-        # Extract info. If stream=False, this might download the file if not present.
+        # Extract info.
         try:
+            # We use download=False but we need process=True to get formats
+            # The previous call might have been too shallow
             data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(url, download=not stream))
         except Exception as e:
             err_msg = str(e).strip().split('\n')[-1]
@@ -161,41 +163,55 @@ class YTDLSource(discord.PCMVolumeTransformer):
                 raise Exception("No search results found.")
             data = data['entries'][0]
 
-        if not data:
-            raise Exception("Failed to extract any data from the provided URL/query.")
+        # RE-EXTRACT IF NECESSARY: If we don't have formats, we MUST get them.
+        if 'formats' not in data:
+            search_url = data.get('webpage_url') or data.get('url')
+            if search_url:
+                print(f"DEBUG: Missing formats, re-extracting from: {search_url}")
+                data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(search_url, download=not stream))
 
-        # SECONDARY EXTRACTION: If formats are missing, we need to process the URL again to get stream URLs
-        if 'formats' not in data and 'webpage_url' in data:
-            print(f"DEBUG: Data is flat, performing secondary extraction for: {data['webpage_url']}")
-            data = await loop.run_in_executor(None, lambda: ytdl_instance.extract_info(data['webpage_url'], download=not stream))
+        if not data:
+            raise Exception("Failed to extract any data.")
 
         # Ensure we have a title
         if 'title' not in data:
             data['title'] = "Unknown Title"
         
-        # CRITICAL FIX: Ensure we use the DIRECT URL from yt-dlp, not the webpage URL
-        filename = data.get('url')
-        
-        # If the direct URL is missing or looks like a webpage, look into formats
-        if not filename or "youtube.com/watch" in filename or "youtu.be/" in filename:
+        # FIND THE BEST AUDIO STREAM
+        filename = None
+        if 'formats' in data:
             try:
-                # Filter for audio-only formats first
-                audio_formats = [f for f in data.get('formats', []) if f.get('vcodec') == 'none' and f.get('url')]
-                if not audio_formats:
-                    audio_formats = [f for f in data.get('formats', []) if f.get('url')]
+                # Filter for REAL audio streams (must have acodec, must not have vcodec)
+                audio_formats = [
+                    f for f in data['formats'] 
+                    if f.get('vcodec') == 'none' 
+                    and f.get('acodec') != 'none' 
+                    and f.get('url')
+                    and f.get('ext') != 'mhtml'
+                ]
                 
                 if audio_formats:
-                    # Sort by quality
+                    # Sort by quality (abr)
                     audio_formats.sort(key=lambda x: x.get('abr', 0) or 0, reverse=True)
-                    filename = audio_formats[0]['url']
+                    # Prefer googlevideo URLs if available
+                    gv_formats = [f for f in audio_formats if ".googlevideo.com" in f.get('url', '')]
+                    if gv_formats:
+                        filename = gv_formats[0]['url']
+                    else:
+                        filename = audio_formats[0]['url']
             except Exception as e:
-                print(f"DEBUG: Format extraction failed: {e}")
+                print(f"DEBUG: Format sorting failed: {e}")
+
+        # Fallback to top-level url if still nothing found in formats
+        if not filename:
+            filename = data.get('url')
 
         if not stream:
             filename = ytdl_instance.prepare_filename(data)
 
-        if not filename:
-             raise Exception("The extracted data does not contain a valid URL or filename for playback.")
+        if not filename or (stream and ("youtube.com" in filename or "youtu.be" in filename)):
+             # If it's still a YouTube link and we are streaming, something is wrong
+             raise Exception("Failed to resolve a direct stream URL. yt-dlp might be being throttled or blocked.")
         
         print(f"DEBUG: Playing Title: {data.get('title')}")
         print(f"DEBUG: Final Stream URL: {filename[:100]}...")
@@ -441,8 +457,20 @@ class Music(commands.Cog):
             color=0x1DB954 # Spotify Green
         )
         
-        if source.data.get('thumbnail'):
-            embed.set_thumbnail(url=source.data['thumbnail'])
+        # Smart Thumbnail Selection
+        thumbnail_url = source.data.get('thumbnail')
+        
+        # Fallback: Search in formats for storyboard/image URLs if primary thumbnail is weak or missing
+        if not thumbnail_url and 'formats' in source.data:
+            image_formats = [
+                f.get('url') for f in source.data['formats']
+                if f.get('acodec') == 'none' and f.get('vcodec') == 'none' and f.get('url')
+            ]
+            if image_formats:
+                thumbnail_url = image_formats[0]
+
+        if thumbnail_url:
+            embed.set_image(url=thumbnail_url) # Using set_image for a larger "front-end" feel
         
         duration = source.data.get('duration')
         if duration:
