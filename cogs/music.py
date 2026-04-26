@@ -351,13 +351,13 @@ class Music(commands.Cog):
             # Aggressive client rotation to avoid 403
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android', 'ios', 'mweb', 'web', 'tv'],
+                    'player_client': ['ios', 'android', 'mweb'],
                     'player_skip': ['webpage', 'configs'],
                 }
             },
             'geo_bypass': True,
             'nocheckcertificate': True,
-            'prefer_insecure': True, # Sometimes helps with 403/throttling on some networks
+            'prefer_insecure': True,
         })
         self.ytdl_yt = yt_dlp.YoutubeDL(yt_opts)
 
@@ -575,16 +575,17 @@ class Music(commands.Cog):
                          self.queue.clear()
                          return
 
+                await self.safe_send(ctx, f"⏳ Loading: **{query[:50]}...**")
                 source = await YTDLSource.from_url(search_query, loop=self.bot.loop, stream=True, ctx=ctx, source_type=source_type, ytdl_instance=ytdl_inst)
                 
                 def after_playing(error):
                     if error:
                         print(f"ERROR: Playback error for {query}: {error}")
                         async def handle_error():
+                            await self.safe_send(ctx, f"❌ Playback error: {error}")
                             if source_type == 'youtube':
                                  await self.trigger_bili_fallback(ctx, query, requester_id)
                             else:
-                                 # Bilibili failed, no fallback, move next
                                  if query in self.bili_retries:
                                      self.bili_retries.remove(query)
                                  await self.play_next(ctx)
@@ -599,9 +600,8 @@ class Music(commands.Cog):
                 await self.update_player(ctx, source)
             
             except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                print(f"ERROR: Playback initialization failed for {query}:\n{error_trace}")
+                err_msg = str(e).strip().split('\n')[-1]
+                await self.safe_send(ctx, f"❌ Failed to load: **{query[:50]}**\n`{err_msg}`")
                 
                 if source_type == 'youtube':
                     await self.trigger_bili_fallback(ctx, query, requester_id)
