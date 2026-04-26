@@ -198,24 +198,17 @@ class YTDLSource(discord.PCMVolumeTransformer):
             _ffmpeg_options = ffmpeg_streaming_options.copy()
             current_ua = random.choice(USER_AGENTS)
             
-            # Inject headers for streaming to avoid 403
             headers = data.get('http_headers', {})
-            # Only override User-Agent if not already specific or if we want rotation
             headers['User-Agent'] = current_ua
             
-            # Bilibili specific: Needs Referer
             if source_type == 'bilibili':
                 headers['Referer'] = 'https://www.bilibili.com/'
             
-            header_items = [f"{key}: {value}" for key, value in headers.items()]
-            header_str = "\r\n".join(header_items) + "\r\n"
+            header_str = "\r\n".join([f"{k}: {v}" for k, v in headers.items()]) + "\r\n"
             
-            if 'before_options' in _ffmpeg_options:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-            else:
-                 _ffmpeg_options['before_options'] = f'-headers "{header_str}"'
-
-            _ffmpeg_options['before_options'] += f' -user_agent "{current_ua}"'
+            # Use standard header injection
+            _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
+            _ffmpeg_options['stderr'] = True # Capture errors
         else:
             _ffmpeg_options = ffmpeg_options.copy()
 
@@ -578,14 +571,14 @@ class Music(commands.Cog):
                          self.queue.clear()
                          return
 
-                await self.safe_send(ctx, f"⏳ Loading: **{query[:50]}...**")
+                await self.safe_send(ctx, f"INFO: Loading: **{query[:50]}...**")
                 source = await YTDLSource.from_url(search_query, loop=self.bot.loop, stream=True, ctx=ctx, source_type=source_type, ytdl_instance=ytdl_inst)
                 
                 def after_playing(error):
                     if error:
                         print(f"ERROR: Playback error for {query}: {error}")
                         async def handle_error():
-                            await self.safe_send(ctx, f"❌ Playback error: {error}")
+                            await self.safe_send(ctx, f"ERROR: Playback error: {error}")
                             if source_type == 'youtube':
                                  await self.trigger_bili_fallback(ctx, query, requester_id)
                             else:
@@ -604,7 +597,7 @@ class Music(commands.Cog):
             
             except Exception as e:
                 err_msg = str(e).strip().split('\n')[-1]
-                await self.safe_send(ctx, f"❌ Failed to load: **{query[:50]}**\n`{err_msg}`")
+                await self.safe_send(ctx, f"ERROR: Failed to load: **{query[:50]}**\n`{err_msg}`")
                 
                 if source_type == 'youtube':
                     await self.trigger_bili_fallback(ctx, query, requester_id)
@@ -1121,6 +1114,20 @@ class Music(commands.Cog):
             inline=False
         )
         embed.add_field(
+            name="**!update_ytdlp**",
+            value="Admin only: Updates yt-dlp to the latest version.",
+            inline=False
+        )
+        embed.add_field(
+            name="**!leave**",
+            value="Disconnects the bot from the voice channel.",
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
+
+async def setup(bot):
+    await bot.add_cog(Music(bot))d(
             name="**!update_ytdlp**",
             value="Admin only: Updates yt-dlp to the latest version.",
             inline=False
