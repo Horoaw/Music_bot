@@ -116,7 +116,7 @@ ffmpeg_options = {
 # Separate options for streaming vs downloading
 ffmpeg_streaming_options = {
     'options': '-vn',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1 -analyzeduration 0 -probesize 32'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -reconnect_on_network_error 1 -reconnect_at_eof 1'
 }
 
 # Pool of User-Agents to rotate
@@ -171,17 +171,20 @@ class YTDLSource(discord.PCMVolumeTransformer):
         # Robust URL extraction
         filename = data.get('url')
         if not filename and 'formats' in data:
-            # Try to find the best audio format from the list if top-level url is missing
-            formats = data['formats']
             # Sort formats to find best audio
             try:
-                # Filter for formats that have a URL
-                valid_formats = [f for f in formats if f.get('url')]
-                if valid_formats:
-                    # If we find a format that matches our preferred ID or just take the last one (usually best)
-                    filename = valid_formats[-1].get('url')
-            except:
-                pass
+                # Filter for audio-only formats
+                audio_formats = [f for f in data['formats'] if f.get('vcodec') == 'none' and f.get('url')]
+                if not audio_formats:
+                    # Fallback to any format with a URL if no audio-only found
+                    audio_formats = [f for f in data['formats'] if f.get('url')]
+                
+                if audio_formats:
+                    # Sort by quality (abr)
+                    audio_formats.sort(key=lambda x: x.get('abr', 0) or 0, reverse=True)
+                    filename = audio_formats[0]['url']
+            except Exception as e:
+                print(f"DEBUG: Format sorting failed: {e}")
 
         if not stream:
             filename = ytdl_instance.prepare_filename(data)
