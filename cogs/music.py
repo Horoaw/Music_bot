@@ -225,10 +225,13 @@ class YTDLSource(discord.PCMVolumeTransformer):
         
         if stream:
             _ffmpeg_options = ffmpeg_streaming_options.copy()
-            current_ua = random.choice(USER_AGENTS)
             
+            # Use the EXACT headers that yt-dlp used to avoid 403
             headers = data.get('http_headers', {})
-            headers['User-Agent'] = current_ua
+            
+            # Ensure User-Agent exists
+            if not headers.get('User-Agent'):
+                headers['User-Agent'] = random.choice(USER_AGENTS)
             
             if source_type == 'bilibili':
                 headers['Referer'] = 'https://www.bilibili.com/'
@@ -240,7 +243,7 @@ class YTDLSource(discord.PCMVolumeTransformer):
             
             # CRITICAL: Pipe stderr to the main process terminal so we can SEE the error
             import subprocess
-            _ffmpeg_options['stderr'] = None # Setting to None or sys.stderr makes it print to console
+            _ffmpeg_options['stderr'] = None
         else:
             _ffmpeg_options = ffmpeg_options.copy()
 
@@ -376,12 +379,13 @@ class Music(commands.Cog):
         yt_opts.update({
             'format': 'bestaudio/best',
             'cookiefile': cookie_path,
-            # Force Node.js for signature solving
             'javascript_executor': 'node',
             'extractor_args': {
                 'youtube': {
                     'player_client': ['tv', 'ios', 'android', 'mweb'],
                     'player_skip': ['webpage', 'configs'],
+                    # Fix signature solving issues
+                    'remote_components': 'ejs:github',
                 }
             },
             'geo_bypass': True,
