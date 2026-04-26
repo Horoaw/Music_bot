@@ -192,6 +192,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if not filename:
              raise Exception("The extracted data does not contain a valid URL or filename for playback.")
         
+        print(f"DEBUG: Extracted URL: {filename[:100]}...")
+        
         _ffmpeg_options = {}
         
         if stream:
@@ -208,7 +210,10 @@ class YTDLSource(discord.PCMVolumeTransformer):
             
             # Use standard header injection
             _ffmpeg_options['before_options'] = f'-headers "{header_str}" ' + _ffmpeg_options['before_options']
-            _ffmpeg_options['stderr'] = True # Capture errors
+            
+            # CRITICAL: Pipe stderr to the main process terminal so we can SEE the error
+            import subprocess
+            _ffmpeg_options['stderr'] = None # Setting to None or sys.stderr makes it print to console
         else:
             _ffmpeg_options = ffmpeg_options.copy()
 
