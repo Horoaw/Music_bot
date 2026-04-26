@@ -164,27 +164,27 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if not data:
             raise Exception("Failed to extract any data from the provided URL/query.")
 
-        # Ensure we have a title and a playable URL/id
+        # Ensure we have a title
         if 'title' not in data:
             data['title'] = "Unknown Title"
         
-        # Robust URL extraction
+        # CRITICAL FIX: Ensure we use the DIRECT URL from yt-dlp, not the webpage URL
         filename = data.get('url')
-        if not filename and 'formats' in data:
-            # Sort formats to find best audio
+        
+        # If the direct URL is missing or looks like a webpage, look into formats
+        if not filename or "youtube.com/watch" in filename or "youtu.be/" in filename:
             try:
-                # Filter for audio-only formats
-                audio_formats = [f for f in data['formats'] if f.get('vcodec') == 'none' and f.get('url')]
+                # Filter for audio-only formats first
+                audio_formats = [f for f in data.get('formats', []) if f.get('vcodec') == 'none' and f.get('url')]
                 if not audio_formats:
-                    # Fallback to any format with a URL if no audio-only found
-                    audio_formats = [f for f in data['formats'] if f.get('url')]
+                    audio_formats = [f for f in data.get('formats', []) if f.get('url')]
                 
                 if audio_formats:
-                    # Sort by quality (abr)
+                    # Sort by quality
                     audio_formats.sort(key=lambda x: x.get('abr', 0) or 0, reverse=True)
                     filename = audio_formats[0]['url']
             except Exception as e:
-                print(f"DEBUG: Format sorting failed: {e}")
+                print(f"DEBUG: Format extraction failed: {e}")
 
         if not stream:
             filename = ytdl_instance.prepare_filename(data)
@@ -192,7 +192,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
         if not filename:
              raise Exception("The extracted data does not contain a valid URL or filename for playback.")
         
-        print(f"DEBUG: Extracted URL: {filename[:100]}...")
+        print(f"DEBUG: Playing Title: {data.get('title')}")
+        print(f"DEBUG: Final Stream URL: {filename[:100]}...")
         
         _ffmpeg_options = {}
         
