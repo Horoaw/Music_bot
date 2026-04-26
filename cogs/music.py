@@ -1127,18 +1127,4 @@ class Music(commands.Cog):
         await ctx.send(embed=embed)
 
 async def setup(bot):
-    await bot.add_cog(Music(bot))d(
-            name="**!update_ytdlp**",
-            value="Admin only: Updates yt-dlp to the latest version.",
-            inline=False
-        )
-        embed.add_field(
-            name="**!leave**",
-            value="Disconnects the bot from the voice channel.",
-            inline=False
-        )
-
-        await ctx.send(embed=embed)
-
-async def setup(bot):
     await bot.add_cog(Music(bot))
